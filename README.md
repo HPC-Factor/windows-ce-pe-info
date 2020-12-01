@@ -18,13 +18,22 @@ Examples:
   wcepeinfo f.exe     Print information about file f.exe.
   wcepeinfo -j f.exe  Print JSON formatted information about file f.exe.  
 ```
-### Example:
+### Example: JSON output
 ```bash
 wcepeinfo -j file.exe
 ```
 
+### Example: Single field output
+```bash
+wcepeinfo -f MachineName file.exe
+```
+example output:
+```
+ARM
+```
+
 ## JSON Output
-The tool outputs formatted JSON, ideal for being used in JS/TS apps.
+The tool outputs formatted JSON when used with the -j tag, ideal for being used in JS/TS apps.
 
 Typescript types are provides in WinCEPEInfoType.ts.
 
