@@ -11,7 +11,7 @@
 
 #define PROGRAM_NAME "wcepeinfo"
 
-#define PROGRAM_VERSION "0.2"
+#define PROGRAM_VERSION "0.3"
 
 #define indent(amount) printf("%*s", amount, "");
 
@@ -20,6 +20,10 @@
 
 uint8_t printJson = 0;
 uint8_t jsonIndent = 0;
+uint8_t objCount = 0;
+uint8_t objLevel = 0;
+uint8_t onlyBasicInfo = 0;
+uint8_t firstValue = 1;
 char *filterField = 0;
 IMAGE_NT_HEADERS32 imageHeaders;
 IMAGE_SECTION_HEADER *imageSectionHeaders;
@@ -39,6 +43,7 @@ Print information from a Windows CE PE header.\n\
                            overrides --json option\n\
   -h, --help               print help\n\
   -v, --version            print version information\n\
+  -b, --basic              print only WCEApp, WCEArch and WCEVersion\n\
 \n\
 Examples:\n\
   " PROGRAM_NAME " f.exe     Print information about file f.exe.\n\
@@ -51,6 +56,24 @@ void version()
 {
     puts("Version " PROGRAM_VERSION);
     exit(0);
+}
+
+void newline()
+{
+    if (!printJson && firstValue)
+    {
+        firstValue = 0;
+        return;
+    }
+    if (objLevel)
+        putc('\n', stdout);
+}
+
+void comma()
+{
+    if (objCount && printJson)
+        putc(',', stdout);
+    objCount++;
 }
 
 const char *machineCodeToName(uint16_t machineCode)
@@ -168,7 +191,7 @@ const char *machineCodeToWindowsCEArch(uint16_t machineCode)
         return "ARM";
         break;
     default:
-        return "INVALID";
+        return "UNKNOWN";
     }
 }
 
@@ -316,7 +339,8 @@ const char *resourceTableEntryIdToName(uint32_t id)
 
 void printFieldName(const char *fieldName, const char *fieldNameJson)
 {
-    if(filterField) return;
+    if (filterField)
+        return;
     if (printJson)
     {
         /* If fieldNameJson is undefined, use fieldname */
@@ -336,8 +360,13 @@ void printFieldName(const char *fieldName, const char *fieldNameJson)
 
 void print16BitValue(const char *fieldName, const char *fieldNameJson, uint16_t value, char hex)
 {
+
+    if (filterField && strcmp(filterField, fieldName))
+        return;
+    comma();
+    newline();
     printFieldName(fieldName, fieldNameJson);
-    if(filterField && strcmp(filterField,fieldName)) return;
+
     if (hex)
     {
         if (printJson)
@@ -349,29 +378,29 @@ void print16BitValue(const char *fieldName, const char *fieldNameJson, uint16_t 
     {
         printf("%u", value);
     }
-
-    if (printJson)
-        putc(',', stdout);
-    putc('\n', stdout);
 }
 
 void printBoolValue(const char *fieldName, const char *fieldNameJson, uint16_t value)
 {
-    if(filterField && strcmp(filterField,fieldName)) return;
+
+    if (filterField && strcmp(filterField, fieldName))
+        return;
+    comma();
+    newline();
+
     printFieldName(fieldName, fieldNameJson);
     if (printJson)
         printf("%s", value ? "true" : "false");
     else
         printf("%d", value ? 1 : 0);
-
-    if (printJson)
-        putc(',', stdout);
-    putc('\n', stdout);
 }
 
 void print32BitValue(const char *fieldName, const char *fieldNameJson, uint32_t value, char hex)
 {
-    if(filterField && strcmp(filterField,fieldName)) return;
+    if (filterField && strcmp(filterField, fieldName))
+        return;
+    comma();
+    newline();
     printFieldName(fieldName, fieldNameJson);
     if (hex)
     {
@@ -384,14 +413,14 @@ void print32BitValue(const char *fieldName, const char *fieldNameJson, uint32_t 
     {
         printf("%u", value);
     }
-    if (printJson)
-        putc(',', stdout);
-    putc('\n', stdout);
 }
 
 void printStringValue(const char *fieldName, const char *fieldNameJson, const char *value)
 {
-    if(filterField && strcmp(filterField,fieldName)) return;
+    if (filterField && strcmp(filterField, fieldName))
+        return;
+    comma();
+    newline();
     printFieldName(fieldName, fieldNameJson);
     if (printJson)
         putc('\"', stdout);
@@ -399,15 +428,17 @@ void printStringValue(const char *fieldName, const char *fieldNameJson, const ch
     if (printJson)
     {
         putc('\"', stdout);
-        putc(',', stdout);
     }
-    putc('\n', stdout);
 }
 
 void jsonStartObject(const char *objectName)
 {
     if (printJson)
     {
+        comma();
+        newline();
+
+        objCount = 0;
         if (objectName)
         {
             printFieldName(objectName, 0);
@@ -416,15 +447,21 @@ void jsonStartObject(const char *objectName)
         {
             indent(jsonIndent * 2);
         }
-        printf("{\n");
+        printf("{");
         jsonIndent++;
     }
+    objLevel++;
 }
 
 void jsonStartArray(const char *objectName)
 {
+
     if (printJson)
     {
+        comma();
+        newline();
+
+        objCount = 0;
         if (objectName)
         {
             printFieldName(objectName, 0);
@@ -433,41 +470,37 @@ void jsonStartArray(const char *objectName)
         {
             indent(jsonIndent * 2);
         }
-        printf("[\n");
+        printf("[");
         jsonIndent++;
     }
+    objLevel++;
 }
 
 void jsonEndArray()
 {
+    objLevel--;
+
     if (printJson)
     {
+        newline();
         if (jsonIndent > 0)
             jsonIndent--;
         indent(jsonIndent * 2);
-        printf("],\n");
+        printf("]");
     }
 }
 
 void jsonEndObject()
 {
-    if (printJson)
-    {
-        if (jsonIndent > 0)
-            jsonIndent--;
-        indent(jsonIndent * 2);
-        printf("},\n");
-    }
-}
 
-void jsonEndFile()
-{
     if (printJson)
     {
+        newline();
+        objLevel--;
         if (jsonIndent > 0)
             jsonIndent--;
         indent(jsonIndent * 2);
-        printf("}\n");
+        printf("}");
     }
 }
 
@@ -580,6 +613,8 @@ uint8_t parseVersionInfoSection(FILE *fp, size_t versionInfoSectionStart, size_t
 {
     if (!versionInfoSectionStart || !size)
         return 0;
+
+    jsonStartObject("versionInfo");
     fseek(fp, versionInfoSectionStart, SEEK_SET);
 
     /* print32BitValue("versionInfoStart", 0, versionInfoSectionStart, HEX); */
@@ -732,6 +767,7 @@ uint8_t parseVersionInfoSection(FILE *fp, size_t versionInfoSectionStart, size_t
             exit(EXIT_FAILURE);
         }
     }
+    jsonEndObject();
     return 1;
 }
 
@@ -852,17 +888,21 @@ int main(int argc, char **argv)
             {"json", no_argument, 0, 'j'},
             {"help", no_argument, NULL, 'h'},
             {"version", no_argument, NULL, 'v'},
+            {"basic", no_argument, NULL, 'b'},
             {"field", required_argument, NULL, 'f'},
             {NULL, 0, NULL, 0}};
     /* getopt_long stores the option index here. */
     int option_index = 0;
 
-    while ((c = getopt_long(argc, argv, "jhvf:", long_options, &option_index)) != -1)
+    while ((c = getopt_long(argc, argv, "jbhvf:", long_options, &option_index)) != -1)
     {
         switch (c)
         {
         case 'j':
             printJson = 1;
+            break;
+        case 'b':
+            onlyBasicInfo = 1;
             break;
         case 'h':
             usage(0);
@@ -879,7 +919,11 @@ int main(int argc, char **argv)
     }
 
     /* field option overrides json option */
-    if(filterField) printJson = 0;
+    if (filterField || onlyBasicInfo)
+        printJson = 0;
+
+    if (filterField)
+        onlyBasicInfo = 0;
 
     const char *infile = "-";
 
@@ -940,6 +984,55 @@ int main(int argc, char **argv)
 
     /* Start JSON block */
     jsonStartObject(0);
+
+    /* True if arch is one of the non-x86 WinCE architectures */
+    uint8_t isWinCEArch = (imageHeaders.FileHeader.Machine == CE_IMAGE_FILE_MACHINE_ARM) ||
+                          (imageHeaders.FileHeader.Machine == CE_IMAGE_FILE_MACHINE_R4000) ||
+                          (imageHeaders.FileHeader.Machine == CE_IMAGE_FILE_MACHINE_SH3) ||
+                          (imageHeaders.FileHeader.Machine == CE_IMAGE_FILE_MACHINE_SH4) ||
+                          (imageHeaders.FileHeader.Machine == CE_IMAGE_FILE_MACHINE_THUMB);
+
+    /* Guess subsystem doesn't mean much for early CE apps */
+    uint8_t isWinCEApp = (imageHeaders.OptionalHeader.Subsystem == IMAGE_SUBSYSTEM_WINDOWS_CE_GUI) || (imageHeaders.OptionalHeader.Subsystem == IMAGE_SUBSYSTEM_WINDOWS_GUI && isWinCEArch);
+
+    /** True if subsystem is 9 (Windows CE GUI) or subsystem is 2 and arch is a non-x86 WinCE arch */
+    printBoolValue("WCEApp", 0, isWinCEApp);
+
+    char wceVersionString[16];
+
+    /* The windows CE version is encoded in subsystem version, except for CE1.0 software, which often has subsystem version 4.0
+     * Problem is, Windows CE 4.0 apps also have version 4.0.
+     * As a compromise, if subsystem version is 4.0, check if the PE file was compiled before 2000 and has arch MIPS/SH3. If so, assume it is for CE1.0 */
+    if (imageHeaders.OptionalHeader.MajorSubsystemVersion == 4 && imageHeaders.OptionalHeader.MinorSubsystemVersion == 0)
+    {
+        // File was compiled before 2000 and is SH3/MIPS
+        if (imageHeaders.FileHeader.TimeDateStamp < 946684800 && (imageHeaders.FileHeader.Machine == CE_IMAGE_FILE_MACHINE_R4000 || imageHeaders.FileHeader.Machine == CE_IMAGE_FILE_MACHINE_SH3))
+        {
+            printStringValue("WCEVersion", 0, "1.0");
+        }
+    }
+    else
+    {
+        if (imageHeaders.OptionalHeader.MinorSubsystemVersion == 0)
+        {
+            sprintf(wceVersionString, "%d.%d", imageHeaders.OptionalHeader.MajorSubsystemVersion, imageHeaders.OptionalHeader.MinorSubsystemVersion);
+        }
+        else
+        {
+            sprintf(wceVersionString, "%d.%02d", imageHeaders.OptionalHeader.MajorSubsystemVersion, imageHeaders.OptionalHeader.MinorSubsystemVersion);
+        }
+        printStringValue("WCEVersion", 0, wceVersionString);
+    }
+
+    printStringValue("WCEArch", 0, machineCodeToWindowsCEArch(imageHeaders.FileHeader.Machine));
+
+    if (onlyBasicInfo)
+    {
+        putc('\n', stdout);
+        exit(EXIT_SUCCESS);
+    }
+
+    /** Windows CE arch */
 
     /* printf("PE Magic: 0x%08hX\n", imageHeaders.Signature); */
     print16BitValue("Machine", 0, imageHeaders.FileHeader.Machine, HEX);
@@ -1008,6 +1101,7 @@ int main(int argc, char **argv)
 
     char subsystemVersionString[16];
     sprintf(subsystemVersionString, "%d.%d", imageHeaders.OptionalHeader.MajorSubsystemVersion, imageHeaders.OptionalHeader.MinorSubsystemVersion);
+
     printStringValue("SubsystemVersion", 0, subsystemVersionString);
 
     /* print32BitValue("Win32VersionValue", 0, imageHeaders.OptionalHeader.Win32VersionValue, HEX); */
@@ -1217,12 +1311,12 @@ int main(int argc, char **argv)
         jsonEndArray();
     }
 
-    jsonStartObject("versionInfo");
     parseVersionInfoSection(fp, versionInfoSectionStart, versionInfoSize);
+
     jsonEndObject();
 
-    jsonEndFile();
+    putc('\n', stdout);
 
     if (ferror(fp))
-        puts("I/O error when reading");
+        fprintf(stderr,"I/O error when reading");
 }
