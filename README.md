@@ -1,4 +1,4 @@
-# Windws CE PE Info
+# Windows CE PE Info
 This tool extracts information from the PE header and is specifically made to examine Windows CE executables.
 You can use it to find out which processor architecture as well as which Version of Windows CE the program was compiled for.
 
