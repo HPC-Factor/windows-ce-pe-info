@@ -3,13 +3,15 @@
 #ifndef WINCEPEHEADER_H
 #define WINCEPEHEADER_H
 
+#include <wchar.h>
+#include <string.h>
+
 #define COFF_OFFSET 0x3C
 
 #define PE32_MAGIC 0x010b
 #define PE32_PLUS_MAGIC 0x020b
 
 #define PE_MAGIC 0x00004550
-
 
 #define IMAGE_SIZEOF_SHORT_NAME 8
 
@@ -101,7 +103,7 @@ typedef struct _IMAGE_IMPORT_DESCRIPTOR
     /** RVA to the name of the dll */
     uint32_t Name;
     /** RVA to IAT (if bound this IAT has actual addresses) */
-    uint32_t FirstThunk; 
+    uint32_t FirstThunk;
 } IMAGE_IMPORT_DESCRIPTOR;
 
 #define IMAGE_NUMBEROF_DIRECTORY_ENTRIES 16
@@ -582,5 +584,227 @@ typedef struct _IMAGE_THUNK_DATA32
 #define PE_OFFSET_DATA_DIRECTORY_CLR_HEADER 208
 /** Reserved */
 #define PE_OFFSET_DATA_DIRECTORY_RESERVED 216
+
+/** Resource Directory Table
+
+Each resource directory table has the following format.
+This data structure should be considered the heading of a table because the table actually consists of directory entries*/
+typedef struct _PE_RESOURCE_DIRECTORY_TABLE
+{
+    /** Resource flags. This field is reserved for future use. It is currently set to zero. */
+    uint32_t Characteristics;
+    /** The time that the resource data was created by the resource compiler. */
+    uint32_t TimeStamp;
+    /** The major version number, set by the user. */
+    uint16_t MajorVersion;
+    /** The minor version number, set by the user. */
+    uint16_t MinorVersion;
+    /** The number of directory entries immediately following the table that use strings to identify Type, Name, or Language entries (depending on the level of the table). */
+    uint16_t NumberOfNameEntries;
+    /** The number of directory entries immediately following the Name entries that use numeric IDs for Type, Name, or Language entries.  */
+    uint16_t NumberOfIdEntries;
+} PE_RESOURCE_DIRECTORY_TABLE;
+
+/** Resource Directory Entries
+
+The directory entries make up the rows of a table. Each resource directory entry has the following format.
+Whether the entry is a Name or ID entry is indicated by the resource directory table, which indicates how many Name and ID entries follow it (remember that all the Name entries precede all the ID entries for the table).
+All entries for the table are sorted in ascending order: the Name entries by case-sensitive string and the ID entries by numeric value.
+Offsets are relative to the address in the IMAGE_DIRECTORY_ENTRY_RESOURCE DataDirectory. See Peering Inside the PE: A Tour of the Win32 Portable Executable File Format for more information. */
+
+typedef struct _PE_RESOURCE_DIRECTORY_TABLE_ENTRY
+{
+    union
+    {
+        /** The offset of a string that gives the Type, Name, or Language ID entry, depending on level of table. */
+        uint32_t NameOffset;
+        /** A 32-bit integer that identifies the Type, Name, or Language ID entry. */
+        uint32_t IntegerID;
+    } NameOffsetOrIntegerID;
+    union
+    {
+        /** High bit 0. Address of a Resource Data entry (a leaf). */
+        uint32_t DataEntryOffset;
+        /** High bit 1. The lower 31 bits are the address of another resource directory table (the next level down).  */
+        uint32_t SubdirectoryOffset;
+    } DataEntryOffsetOrSubdirectoryOffset;
+} PE_RESOURCE_DIRECTORY_TABLE_ENTRY;
+
+/* Resource Data Entry
+
+Each Resource Data entry describes an actual unit of raw data in the Resource Data area. */
+typedef struct _PE_RESOURCE_DATA_ENTRY
+{
+    /** The address of a unit of resource data in the Resource Data area. */
+    uint32_t DataRVA;
+    /** The size, in bytes, of the resource data that is pointed to by the Data RVA field. */
+    uint32_t Size;
+    /** The code page that is used to decode code point values within the resource data. Typically, the code page would be the Unicode code page. */
+    uint32_t Codepage;
+    /** Reserved, must be 0. */
+    uint32_t Reserved;
+} PE_RESOURCE_DATA_ENTRY;
+
+/*
+ * Predefined Resource Types
+ * see https://docs.microsoft.com/en-us/windows/win32/menurc/resource-types?redirectedfrom=MSDN
+ */
+#define RT_0 0
+#define RT_CURSOR 1
+#define RT_BITMAP 2
+#define RT_ICON 3
+#define RT_MENU 4
+#define RT_DIALOG 5
+#define RT_STRING 6
+#define RT_FONTDIR 7
+#define RT_FONT 8
+#define RT_ACCELERATOR 9
+#define RT_RCDATA 10
+#define RT_MESSAGETABLE 11
+#define RT_GROUP_CURSOR 12
+#define RT_13 13
+#define RT_GROUP_ICON 14
+#define RT_15 15
+#define RT_VERSION 16
+#define RT_DLGINCLUDE 17
+#define RT_18 18
+#define RT_PLUGPLAY 19
+#define RT_VXD 20
+#define RT_ANICURSOR 21
+#define RT_ANIICON 22
+#define RT_HTML 23
+#define RT_MANIFEST 24
+
+// winver.h
+
+/** Contains version information for a file. This information is language and code page independent. 
+ * See https://docs.microsoft.com/en-us/windows/win32/api/verrsrc/ns-verrsrc-vs_fixedfileinfo */
+typedef struct _VS_FIXEDFILEINFO
+{
+    /** Contains the value 0xFEEF04BD. This is used with the szKey member of the VS_VERSIONINFO structure when searching a file for the VS_FIXEDFILEINFO structure. */
+    uint32_t dwSignature;
+    /** The binary version number of this structure. The high-order word of this member contains the major version number, and the low-order word contains the minor version number. */
+    uint32_t dwStrucVersion;
+    /** The most significant 32 bits of the file's binary version number. This member is used with dwFileVersionLS to form a 64-bit value used for numeric comparisons. */
+    uint32_t dwFileVersionMS;
+    /** The least significant 32 bits of the file's binary version number. This member is used with dwFileVersionMS to form a 64-bit value used for numeric comparisons. */
+    uint32_t dwFileVersionLS;
+    /** The most significant 32 bits of the binary version number of the product with which this file was distributed. This member is used with dwProductVersionLS to form a 64-bit value used for numeric comparisons. */
+    uint32_t dwProductVersionMS;
+    /** The least significant 32 bits of the binary version number of the product with which this file was distributed. This member is used with dwProductVersionMS to form a 64-bit value used for numeric comparisons. */
+    uint32_t dwProductVersionLS;
+    /** Contains a bitmask that specifies the valid bits in dwFileFlags. A bit is valid only if it was defined when the file was created. */
+    uint32_t dwFileFlagsMask;
+    /** Contains a bitmask that specifies the Boolean attributes of the file.  */
+    uint32_t dwFileFlags;
+    /** The operating system for which this file was designed. */
+    uint32_t dwFileOS;
+    /** An application can combine these values to indicate that the file was designed for one operating system running on another.  */
+    uint32_t dwFileType;
+    /** The general type of file. */
+    uint32_t dwFileSubtype;
+    /** The function of the file. The possible values depend on the value of dwFileType. For all values of dwFileType not described in the following list, dwFileSubtype is zero. */
+    uint32_t dwFileDateMS;
+    /** If dwFileType is VFT_FONT, dwFileSubtype can be one of the following values. */
+    uint32_t dwFileDateLS;
+} VS_FIXEDFILEINFO;
+
+#define SZ_KEY_VS_VERSIONINFO L"VS_VERSION_INFO"
+
+/** Represents the organization of data in a file-version resource. It is the root structure that contains all other file-version information structures. */
+typedef struct _VS_VERSIONINFO
+{
+    /** The length, in bytes, of the VS_VERSIONINFO structure. This length does not include any padding that aligns any subsequent version resource data on a 32-bit boundary. */
+    uint16_t wLength;
+    /** The length, in bytes, of the Value member. This value is zero if there is no Value member associated with the current version structure. */
+    uint16_t wValueLength;
+    /** The type of data in the version resource. This member is 1 if the version resource contains text data and 0 if the version resource contains binary data. */
+    uint16_t wType;
+    /** The Unicode string L"VS_VERSION_INFO". */
+    wchar_t szKey[16];
+    /** Contains as many zero words as necessary to align the Value member on a 32-bit boundary. */
+    //uint16_t Padding1;
+    /** Arbitrary data associated with this VS_VERSIONINFO structure. The wValueLength member specifies the length of this member; if wValueLength is zero, this member does not exist. */
+    //VS_FIXEDFILEINFO Value;
+    /** As many zero words as necessary to align the Children member on a 32-bit boundary. These bytes are not included in wValueLength. This member is optional. */
+    //uint16_t Padding2;
+
+    //uint16_t Children;
+} VS_VERSIONINFO;
+
+#define SZ_KEY_STRING_FILE_INFO L"StringFileInfo"
+
+typedef struct
+{
+    uint16_t wLength;
+    uint16_t wValueLength;
+    uint16_t wType;
+    /** The Unicode string L"StringFileInfo". */
+    wchar_t szKey[15];
+    // WORD        Padding;
+    // VS_STRING_TABLE Children;
+} VS_STRING_FILE_INFO_HEADER;
+
+#define SZ_KEY_VAR_FILE_INFO L"VarFileInfo"
+
+typedef struct
+{
+    uint16_t wLength;
+    uint16_t wValueLength;
+    uint16_t wType;
+    /** The Unicode string L"VarFileInfo". */
+    wchar_t szKey[12];
+    //WORD  Padding;
+    //Var   Children;
+} VS_VAR_FILE_INFO_HEADER;
+
+typedef struct
+{
+    uint16_t wLength;
+    /** This member is always equal to zero. */
+    uint16_t wValueLength;
+    /** The type of data in the version resource. This member is 1 if the version resource contains text data and 0 if the version resource contains binary data. */
+    uint16_t wType;
+    /** An 8-digit hexadecimal number stored as a Unicode string. The four most significant digits represent the language identifier.
+     * The four least significant digits represent the code page for which the data is formatted.
+     * Each Microsoft Standard Language identifier contains two parts: the low-order 10 bits specify the major language, and the high-order 6 bits specify the sublanguage. */
+    wchar_t szKey[9];
+    //WORD   Padding;
+    //VS_STRING Children;
+} VS_STRING_TABLE_HEADER;
+
+/** Represents the organization of data in a file-version resource. 
+ * It contains a string that describes a specific aspect of a file, for example, a file's version, its copyright notices, or its trademarks. */
+typedef struct
+{
+    /** The length, in bytes, of this String structure. */
+    uint16_t wLength;
+    /** The size, in words, of the Value member. */
+    uint16_t wValueLength;
+    /** The type of data in the version resource. This member is 1 if the version resource contains text data and 0 if the version resource contains binary data. */
+    uint16_t wType;
+    /** An arbitrary Unicode string. The szKey member can be one or more of the following values. These values are guidelines only. */
+    //wchar_t szKey[1];
+    //WORD  Padding;
+    //WORD  Value;
+} VS_STRING_HEADER;
+
+#define SZ_KEY_VAR L"Translation"
+
+/** Represents the organization of data in a file-version resource. 
+ * It typically contains a list of language and code page identifier pairs that the version of the application or DLL supports. */
+typedef struct
+{
+    /** The length, in bytes, of the Var structure. */
+    uint16_t wLength;
+    /** The length, in bytes, of the Value member. */
+    uint16_t wValueLength;
+    /** The type of data in the version resource. This member is 1 if the version resource contains text data and 0 if the version resource contains binary data. */
+    uint16_t wType;
+    /** The Unicode string L"Translation". */
+    wchar_t szKey[12];
+    //WORD  Padding;
+    //DWORD Value;
+} VS_VAR_HEADER;
 
 #endif

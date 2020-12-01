@@ -5,6 +5,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <time.h>
+#include <assert.h>
 
 #include "WinCePEHeader.h"
 
@@ -19,6 +20,11 @@
 
 uint8_t printJson = 0;
 uint8_t jsonIndent = 0;
+IMAGE_NT_HEADERS32 imageHeaders;
+IMAGE_SECTION_HEADER *imageSectionHeaders;
+
+size_t versionInfoSectionStart = 0;
+size_t versionInfoSize;
 
 void usage(int status)
 {
@@ -136,6 +142,38 @@ const char *machineCodeToName(uint16_t machineCode)
     }
 }
 
+const char *machineCodeToWindowsCEArch(uint16_t machineCode)
+{
+    switch (machineCode)
+    {
+    case CE_IMAGE_FILE_MACHINE_ARM:
+        return "ARM";
+        break;
+    /** Intel 386 or later processors and compatible processors */
+    case CE_IMAGE_FILE_MACHINE_I386:
+        return "X86";
+        break;
+    /** MIPS little endian */
+    case CE_IMAGE_FILE_MACHINE_R4000:
+        return "MIPS";
+        break;
+    /** Hitachi SH3 */
+    case CE_IMAGE_FILE_MACHINE_SH3:
+        return "SH3";
+        break;
+    /** Hitachi SH4 */
+    case CE_IMAGE_FILE_MACHINE_SH4:
+        return "SH4";
+        break;
+    /** Thumb */
+    case CE_IMAGE_FILE_MACHINE_THUMB:
+        return "ARM";
+        break;
+    default:
+        return "INVALID";
+    }
+}
+
 const char *subsystemIdToName(uint16_t subSystemId)
 {
     switch (subSystemId)
@@ -219,6 +257,65 @@ const char *timestampToString(uint32_t timeStamp32)
     return buffer;
 }
 
+const char *resourceTableEntryIdToName(uint32_t id)
+{
+    switch (id)
+    {
+    case RT_0:
+        return "RT_0";
+    case RT_CURSOR:
+        return "RT_CURSOR";
+    case RT_BITMAP:
+        return "RT_BITMAP";
+    case RT_ICON:
+        return "RT_ICON";
+    case RT_MENU:
+        return "RT_MENU";
+    case RT_DIALOG:
+        return "RT_DIALOG";
+    case RT_STRING:
+        return "RT_STRING";
+    case RT_FONTDIR:
+        return "RT_FONTDIR";
+    case RT_FONT:
+        return "RT_FONT";
+    case RT_ACCELERATOR:
+        return "RT_ACCELERATOR";
+    case RT_RCDATA:
+        return "RT_RCDATA";
+    case RT_MESSAGETABLE:
+        return "RT_MESSAGETABLE";
+    case RT_GROUP_CURSOR:
+        return "RT_GROUP_CURSOR";
+    case RT_13:
+        return "RT_13";
+    case RT_GROUP_ICON:
+        return "RT_GROUP_ICON";
+    case RT_15:
+        return "RT_15";
+    case RT_VERSION:
+        return "RT_VERSION";
+    case RT_DLGINCLUDE:
+        return "RT_DLGINCLUDE";
+    case RT_18:
+        return "RT_18";
+    case RT_PLUGPLAY:
+        return "RT_PLUGPLAY";
+    case RT_VXD:
+        return "RT_VXD";
+    case RT_ANICURSOR:
+        return "RT_ANICURSOR";
+    case RT_ANIICON:
+        return "RT_ANIICON";
+    case RT_HTML:
+        return "RT_HTML";
+    case RT_MANIFEST:
+        return "RT_MANIFEST";
+    default:
+        return 0;
+    }
+}
+
 void printFieldName(const char *fieldName, const char *fieldNameJson)
 {
 
@@ -251,7 +348,7 @@ void print16BitValue(const char *fieldName, const char *fieldNameJson, uint16_t 
     }
     else
     {
-        printf("%d", value);
+        printf("%u", value);
     }
 
     if (printJson)
@@ -278,13 +375,13 @@ void print32BitValue(const char *fieldName, const char *fieldNameJson, uint32_t 
     if (hex)
     {
         if (printJson)
-            printf("\"0x%08hX\"", value);
+            printf("\"0x%08X\"", value);
         else
-            printf("0x%08hX", value);
+            printf("0x%08X", value);
     }
     else
     {
-        printf("%d", value);
+        printf("%u", value);
     }
     if (printJson)
         putc(',', stdout);
@@ -383,10 +480,10 @@ void readNullTerminatedString(char *buffer, uint16_t maxSize, FILE *__stream)
     }
 }
 
-uint32_t RVAtoFileOffset(IMAGE_NT_HEADERS32 *pNTHeader, uint32_t RVA)
+uint32_t RVAtoFileOffset(uint32_t RVA)
 {
-    IMAGE_FILE_HEADER *fileHeader = &(pNTHeader->FileHeader);
-    IMAGE_OPTIONAL_HEADER *optionalHeader = &(pNTHeader->OptionalHeader);
+    IMAGE_FILE_HEADER *fileHeader = &(imageHeaders.FileHeader);
+    IMAGE_OPTIONAL_HEADER *optionalHeader = &(imageHeaders.OptionalHeader);
     uint16_t sizeOfOptionalHeader = fileHeader->SizeOfOptionalHeader;
 
     uint16_t numberOfSections = fileHeader->NumberOfSections;
@@ -394,15 +491,18 @@ uint32_t RVAtoFileOffset(IMAGE_NT_HEADERS32 *pNTHeader, uint32_t RVA)
     IMAGE_SECTION_HEADER *firstSectionHeader;
     firstSectionHeader = (IMAGE_SECTION_HEADER *)(((uint8_t *)optionalHeader) + sizeOfOptionalHeader);
 
-    IMAGE_SECTION_HEADER *section = firstSectionHeader;
+    IMAGE_SECTION_HEADER *section = imageSectionHeaders;
     for (int i = 0; i < numberOfSections; i++)
     {
 
         uint32_t VirtualAddress = section->VirtualAddress;
         uint32_t VirtualSize = section->Misc.VirtualSize;
-
+        //printf("Section %u\n", i);
+        //print32BitValue("VirtualAddress", 0, VirtualAddress, HEX);
+        //print32BitValue("EndAddress", 0, VirtualAddress + VirtualSize, HEX);
         if (VirtualAddress <= RVA && RVA < VirtualAddress + VirtualSize)
         {
+
             // RVA is in this section.
             return (RVA - VirtualAddress) + section->PointerToRawData;
         }
@@ -412,6 +512,322 @@ uint32_t RVAtoFileOffset(IMAGE_NT_HEADERS32 *pNTHeader, uint32_t RVA)
     }
 
     return 0;
+}
+
+size_t align32Bit(size_t addr)
+{
+    //print32BitValue("addr  ", 0, addr, HEX);
+    size_t addr2 = (addr >> 2) << 2;
+    if (addr2 == addr)
+        return addr;
+    //print32BitValue("addr al", 0, addr2 + 4, HEX);
+    return addr2 + 4;
+}
+
+uint8_t wc16sequals(const wchar_t *str1, const wchar_t *str2)
+{
+    uint8_t c1, c2;
+    for (int i = 0;; i++)
+    {
+        //print16BitValue("c1",0,str1[i],HEX);
+        //print16BitValue("c2",0,str2[i],HEX);
+        if (str1[i] != str2[i])
+            return 0;
+        if (!str1[i] && !str2[i])
+            return 1;
+    }
+}
+
+uint8_t wc16stoc(const wchar_t *str, char *out, int len)
+{
+    for (int i = 0; i < len; i++)
+    {
+        out[i] = (char)str[i];
+        if (!str[i])
+            return 1;
+    }
+    return 0;
+}
+
+uint8_t readwc16(FILE *fp, char *out, int len)
+{
+    for (int i = 0; i < len; i++)
+    {
+        char inchar[2];
+        fread(inchar, 2, 1, fp);
+        out[i] = inchar[0];
+        if (!inchar[0] && !inchar[1])
+            return 1;
+    }
+    fprintf(stderr, "readwc16 Value exceeded");
+    return 0;
+}
+
+uint8_t parseVersionInfoSection(FILE *fp, size_t versionInfoSectionStart, size_t size)
+{
+    if (!versionInfoSectionStart || !size)
+        return 0;
+    fseek(fp, versionInfoSectionStart, SEEK_SET);
+
+
+    //print32BitValue("versionInfoStart", 0, versionInfoSectionStart, HEX);
+    //print32BitValue("versionInfoSize", 0, size, HEX);
+
+    VS_VERSIONINFO versionInfoHeader;
+    fread(&versionInfoHeader, sizeof(VS_VERSIONINFO), 1, fp);
+
+    char strbuf[128];
+    wc16stoc(versionInfoHeader.szKey, strbuf, 16);
+
+    if (!wc16sequals(SZ_KEY_VS_VERSIONINFO, versionInfoHeader.szKey))
+    {
+        fprintf(stderr, "szKey should be \"VS_VERSION_INFO\" but is \"%s\"\n", strbuf);
+        exit(1);
+    }
+
+    //print16BitValue("versionInfoHeader.wLength", 0, versionInfoHeader.wLength, HEX);
+    //print16BitValue("versionInfoHeader.wValueLength", 0, versionInfoHeader.wValueLength, HEX);
+    //print16BitValue("versionInfoHeader.wType", 0, versionInfoHeader.wType, HEX);
+    //printStringValue("versionInfoHeader.szKey", 0, strbuf);
+    //print32BitValue("versionInfoSectionEnd", 0, (versionInfoSectionStart + versionInfoHeader.wLength), HEX);
+    //print32BitValue("versionInfoHeader.szKey", 0, versionInfoHeader.szKey, HEX);
+    // Align file pointer to 32 bit
+
+    fseek(fp, align32Bit(ftell(fp)), SEEK_SET);
+
+    VS_FIXEDFILEINFO fixedFileInfo;
+    if (versionInfoHeader.wValueLength)
+    {
+        fread(&fixedFileInfo, versionInfoHeader.wValueLength, 1, fp);
+        if (versionInfoHeader.wValueLength != sizeof(VS_FIXEDFILEINFO))
+        {
+            puts("versionInfoHeader.wValueLength != sizeof(VS_FIXEDFILEINFO)");
+        }
+    }
+
+    size_t pos = align32Bit(ftell(fp));
+    // Align file pointer to 32 bit
+    fseek(fp, pos, SEEK_SET);
+
+    // Read all StringFileInfo and VarFileInfo structures
+    VS_STRING_FILE_INFO_HEADER stringFileInfoHeader;
+    VS_VAR_FILE_INFO_HEADER varFileInfoHeader;
+    while (ftell(fp) < (versionInfoSectionStart + versionInfoHeader.wLength))
+    {
+        pos = ftell(fp);
+        fread(&stringFileInfoHeader, sizeof(VS_STRING_FILE_INFO_HEADER), 1, fp);
+        size_t stringFileInfoEndPosition = pos + stringFileInfoHeader.wLength;
+
+        if (wc16sequals(SZ_KEY_STRING_FILE_INFO, stringFileInfoHeader.szKey))
+        {
+            //jsonStartObject("StringFileInfo");
+            //print32BitValue("stringFileInfoEndPosition", 0, stringFileInfoEndPosition, HEX);
+            // Item is StringFileInfo
+            //printf("Item is StringFileInfo\n");
+
+            fseek(fp, align32Bit(ftell(fp)), SEEK_SET);
+
+            //print32BitValue("stringtable addr", 0, ftell(fp), HEX);
+            wc16stoc(stringFileInfoHeader.szKey, strbuf, 15);
+            //printStringValue("szKey", 0, strbuf);
+
+            while (ftell(fp) < stringFileInfoEndPosition)
+            {
+                // Read string table header
+                VS_STRING_TABLE_HEADER stringTableHeader;
+                pos = ftell(fp);
+                fread(&stringTableHeader, sizeof(VS_STRING_TABLE_HEADER), 1, fp);
+
+                //jsonStartObject("StringTable");
+                //print32BitValue("pos", 0, pos, HEX);
+
+                //print32BitValue("wLength", 0, stringTableHeader.wLength, HEX);
+
+                size_t stringTableEndPosition = pos + stringTableHeader.wLength;
+
+                //print32BitValue("stringTableEndPosition", 0, stringTableEndPosition, HEX);
+
+                fseek(fp, align32Bit(ftell(fp)), SEEK_SET);
+
+                //print32BitValue("addr", 0, ftell(fp), HEX);
+                while (ftell(fp) < stringTableEndPosition)
+                {
+                    pos = ftell(fp);
+
+                    VS_STRING_HEADER stringHeader;
+                    //printf("String\n");
+                    //print32BitValue("addr",0,ftell(fp),HEX);
+
+                    fread(&stringHeader, sizeof(VS_STRING_HEADER), 1, fp);
+                    size_t stringHeaderEndPosition = pos + stringHeader.wLength;
+
+                    //jsonStartObject("String");
+
+                    //print16BitValue("wLength", 0, stringHeader.wLength, DEC);
+                    //print16BitValue("wValueLength", 0, stringHeader.wValueLength, DEC);
+                    //print32BitValue("stringHeaderStaPosition", 0, pos, HEX);
+                    //print32BitValue("stringHeaderEndPosition", 0, stringHeaderEndPosition, HEX);
+
+                    char keyBuffer[64];
+
+                    readwc16(fp, keyBuffer, 64);
+                    //printStringValue("key", 0, keyBuffer);
+
+                    fseek(fp, align32Bit(ftell(fp)), SEEK_SET);
+
+                    char valueBuffer[128];
+                    if (stringHeader.wValueLength)
+                    {
+                        readwc16(fp, valueBuffer, 128);
+                        //printStringValue("value", 0, valueBuffer);
+                        printStringValue(keyBuffer, 0, valueBuffer);
+                    }
+
+                    //fseek(fp, stringHeaderEndPosition, SEEK_SET);
+
+                    if (ftell(fp) > stringHeaderEndPosition)
+                        fprintf(stderr, "ftell(fp)> stringHeaderEndPosition");
+
+                    // Align to 32Bit after each string
+                    fseek(fp, align32Bit(ftell(fp)), SEEK_SET);
+
+                    //exit(0);
+
+                    //jsonEndObject();
+                }
+                //jsonEndObject();
+            }
+            //jsonEndObject();
+        }
+        else if (wc16sequals(SZ_KEY_VAR_FILE_INFO, stringFileInfoHeader.szKey))
+        {
+            // Item is a VarFileInfo
+            // Re-read section as VarFileInfo
+            fseek(fp, pos, SEEK_SET);
+            //fread(&varFileInfoHeader, sizeof(VS_VAR_FILE_INFO_HEADER), 1, fp);
+
+            // Align to 32 bit
+            //pos = align32Bit(ftell(fp));
+            //fseek(fp, pos, SEEK_SET);
+
+            // Skip this section
+            fseek(fp, stringFileInfoHeader.wLength, SEEK_CUR);
+        }
+        else
+        {
+            wc16stoc(stringFileInfoHeader.szKey, strbuf, 16);
+            fprintf(stderr, "szKey should be \"StringFileInfo\" or \"VarFileInfo\" but is \"%s\"\n", strbuf);
+            exit(1);
+        }
+    }
+    return 1;
+}
+
+void parseResourceDirectoryTableEntry(PE_RESOURCE_DATA_ENTRY *resourceDataEntry, size_t resourceSectionStartAddress, FILE *fp)
+{
+    //print32BitValue("DataRVA", 0, resourceDataEntry->DataRVA, HEX);
+    //print32BitValue("DataAddress", 0, RVAtoFileOffset(resourceDataEntry->DataRVA), HEX);
+    //print32BitValue("Size", 0, resourceDataEntry->Size, DEC);
+    //print32BitValue("Codepage", 0, resourceDataEntry->Codepage, HEX);
+    //print32BitValue("DataRVA", 0, resourceDataEntry->DataRVA, HEX);
+    versionInfoSectionStart = RVAtoFileOffset(resourceDataEntry->DataRVA);
+    versionInfoSize = resourceDataEntry->Size;
+}
+
+// 0x0000798e
+/**
+ * Parse resource tree and get the version info. Ignore all other nodes
+ */
+void parseResourceDirectoryTable(PE_RESOURCE_DIRECTORY_TABLE *resourceDirectoryTable, size_t resourceSectionStartAddress, FILE *fp, uint8_t level)
+{
+
+    //jsonStartArray("resources");
+    //print32BitValue("NumberOfIdEntries", 0, resourceDirectoryTable->NumberOfIdEntries, DEC);
+    //print32BitValue("NumberOfNameEntries", 0, resourceDirectoryTable->NumberOfNameEntries, DEC);
+    PE_RESOURCE_DIRECTORY_TABLE_ENTRY *resourceDirectoryTableNameEntries = malloc(sizeof(PE_RESOURCE_DIRECTORY_TABLE_ENTRY) * (resourceDirectoryTable->NumberOfNameEntries));
+    fread(resourceDirectoryTableNameEntries, sizeof(PE_RESOURCE_DIRECTORY_TABLE_ENTRY), resourceDirectoryTable->NumberOfNameEntries, fp);
+
+    /* Ignore named entries
+    for (uint8_t i = 0; i < resourceDirectoryTable->NumberOfNameEntries; i++)
+    {
+        uint32_t nameOffset = resourceDirectoryTableNameEntries[i].NameOffsetOrIntegerID.NameOffset;
+        jsonStartObject(0);
+        size_t offset = resourceDirectoryTableNameEntries[i].DataEntryOffsetOrSubdirectoryOffset.SubdirectoryOffset;
+        if (offset & 0x80000000)
+        {
+            //printBoolValue("IsSub", 0, 1);
+            offset = (offset & 0x7FFFFFFF) + resourceSectionStartAddress;
+            PE_RESOURCE_DIRECTORY_TABLE *resourceDirectoryTable2 = malloc(sizeof(PE_RESOURCE_DIRECTORY_TABLE));
+
+            fseek(fp, offset, SEEK_SET);
+
+            fread(resourceDirectoryTable2, sizeof(PE_RESOURCE_DIRECTORY_TABLE), 1, fp);
+
+            parseResourceDirectoryTable(resourceDirectoryTable2, resourceSectionStartAddress, fp, level+1);
+        }
+        else
+        {
+            //printBoolValue("IsLeaf", 0, 1);
+            print32BitValue("nameOffset", 0, nameOffset, HEX);
+            print32BitValue("offset", 0, offset, HEX);
+        }
+
+        jsonEndObject();
+    }*/
+
+    PE_RESOURCE_DIRECTORY_TABLE_ENTRY *resourceDirectoryTableIdEntries = malloc(sizeof(PE_RESOURCE_DIRECTORY_TABLE_ENTRY) * (resourceDirectoryTable->NumberOfIdEntries));
+    fread(resourceDirectoryTableIdEntries, sizeof(PE_RESOURCE_DIRECTORY_TABLE_ENTRY), resourceDirectoryTable->NumberOfIdEntries, fp);
+
+    for (uint8_t i = 0; i < resourceDirectoryTable->NumberOfIdEntries; i++)
+    {
+        uint32_t id = resourceDirectoryTableIdEntries[i].NameOffsetOrIntegerID.IntegerID;
+
+        // Continue loop if this is not a version node
+        if (level == 0 && id != RT_VERSION)
+            continue;
+
+        //jsonStartObject(0);
+        size_t offset = resourceDirectoryTableIdEntries[i].DataEntryOffsetOrSubdirectoryOffset.SubdirectoryOffset;
+
+        //print32BitValue("ID    ", 0, resourceDirectoryTableIdEntries[i].NameOffsetOrIntegerID.IntegerID, 1);
+
+        if (resourceTableEntryIdToName(id) && level == 0)
+        {
+            //printStringValue("Name", 0, resourceTableEntryIdToName(id));
+        }
+        //print32BitValue("ID", 0, id, HEX);
+        if (offset & 0x80000000)
+        {
+            // Entry points to another resource entry table
+            //printBoolValue("IsSub", 0, 1);
+            offset = (offset & 0x7FFFFFFF) + resourceSectionStartAddress;
+            //print32BitValue("offset", 0, offset, 1);
+            PE_RESOURCE_DIRECTORY_TABLE *resourceDirectoryTable2 = malloc(sizeof(PE_RESOURCE_DIRECTORY_TABLE));
+
+            fseek(fp, offset, SEEK_SET);
+
+            fread(resourceDirectoryTable2, sizeof(PE_RESOURCE_DIRECTORY_TABLE), 1, fp);
+
+            parseResourceDirectoryTable(resourceDirectoryTable2, resourceSectionStartAddress, fp, level + 1);
+        }
+        else
+        {
+            // Entry points to a Resource Data Entry
+            offset = offset + resourceSectionStartAddress;
+            //printBoolValue("IsLeaf", 0, 1);
+            //print32BitValue("ID", 0, id, HEX);
+            //print32BitValue("offset", 0, offset, HEX);
+            PE_RESOURCE_DATA_ENTRY *resourceDataEntry = malloc(sizeof(PE_RESOURCE_DATA_ENTRY));
+
+            fseek(fp, offset, SEEK_SET);
+
+            fread(resourceDataEntry, sizeof(PE_RESOURCE_DATA_ENTRY), 1, fp);
+            parseResourceDirectoryTableEntry(resourceDataEntry, resourceSectionStartAddress, fp);
+        }
+        //jsonEndObject();
+    }
+
+    //jsonEndArray();
 }
 
 int main(int argc, char **argv)
@@ -476,8 +892,6 @@ int main(int argc, char **argv)
     // Seek to start of COFF header
     fseek(fp, coff_start, SEEK_SET);
 
-    IMAGE_NT_HEADERS32 imageHeaders;
-
     fread(&imageHeaders, sizeof(IMAGE_NT_HEADERS32), 1, fp);
 
     // Check for PE\0\0 Marker
@@ -498,7 +912,7 @@ int main(int argc, char **argv)
     }
     if (sizeof(IMAGE_OPTIONAL_HEADER) != imageHeaders.FileHeader.SizeOfOptionalHeader)
     {
-        fprintf(stderr, "error: Size of optional header should be %d for a PE file, but is %d. PE+ files are not supported.\n", sizeof(IMAGE_OPTIONAL_HEADER), imageHeaders.FileHeader.SizeOfOptionalHeader);
+        fprintf(stderr, "error: Size of optional header should be %u for a PE file, but is %u. PE+ files are not supported.\n", (uint32_t)sizeof(IMAGE_OPTIONAL_HEADER), imageHeaders.FileHeader.SizeOfOptionalHeader);
         exit(EXIT_FAILURE);
     }
 
@@ -564,7 +978,7 @@ int main(int argc, char **argv)
 
     char imageVersionString[16];
     sprintf(imageVersionString, "%d.%d", imageHeaders.OptionalHeader.MajorImageVersion, imageHeaders.OptionalHeader.MinorImageVersion);
-    printStringValue("OperatingSystemVersion", 0, imageVersionString);
+    printStringValue("ImageVersion", 0, imageVersionString);
 
     print32BitValue("MajorSubsystemVersion", 0, imageHeaders.OptionalHeader.MajorSubsystemVersion, DEC);
     print32BitValue("MinorSubsystemVersion", 0, imageHeaders.OptionalHeader.MinorSubsystemVersion, DEC);
@@ -586,7 +1000,7 @@ int main(int argc, char **argv)
     print32BitValue("LoaderFlags", 0, imageHeaders.OptionalHeader.LoaderFlags, DEC);
     print32BitValue("NumberOfRvaAndSizes", 0, imageHeaders.OptionalHeader.NumberOfRvaAndSizes, DEC);
 
-    IMAGE_DATA_DIRECTORY importDir = imageHeaders.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+    //IMAGE_DATA_DIRECTORY importDir = imageHeaders.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
 
     // DATA_DIRECTORIES
     //printf("\n******* DATA DIRECTORIES *******\n");
@@ -596,7 +1010,8 @@ int main(int argc, char **argv)
     // SECTION_HEADERS
     //printf("\n******* SECTION HEADERS *******\n");
 
-    IMAGE_SECTION_HEADER imageSectionHeaders[imageHeaders.FileHeader.NumberOfSections];
+    //IMAGE_SECTION_HEADER imageSectionHeaders[imageHeaders.FileHeader.NumberOfSections];
+    imageSectionHeaders = malloc(imageHeaders.FileHeader.NumberOfSections * sizeof(IMAGE_SECTION_HEADER));
 
     fread(imageSectionHeaders, sizeof(IMAGE_SECTION_HEADER), imageHeaders.FileHeader.NumberOfSections, fp);
 
@@ -604,7 +1019,7 @@ int main(int argc, char **argv)
     size_t sectionLocation = (size_t)(&imageHeaders) + sizeof(uint32_t) + (size_t)(sizeof(IMAGE_FILE_HEADER)) + (size_t)imageHeaders.FileHeader.SizeOfOptionalHeader;
     size_t sectionSize = sizeof(IMAGE_SECTION_HEADER);
 
-    for (int i = 1; i < IMAGE_NUMBEROF_DIRECTORY_ENTRIES; i++)
+    /*for (int i = 1; i < IMAGE_NUMBEROF_DIRECTORY_ENTRIES; i++)
     {
         char *name;
         switch (i)
@@ -662,29 +1077,30 @@ int main(int argc, char **argv)
             print16BitValue("Size", 0, imageHeaders.OptionalHeader.DataDirectory[i].Size, HEX);
             jsonEndObject();
         }
-    }
+    }*/
+
     // get offset to the import directory RVA
     size_t importDirectoryRVA = imageHeaders.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
-    size_t resourceRVA = imageHeaders.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_RESOURCE].VirtualAddress;
+    size_t resourceDirectoryRVA = imageHeaders.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_RESOURCE].VirtualAddress;
 
     //IMAGE_SECTION_HEADER *sectionHeader;
     IMAGE_SECTION_HEADER *importSection;
     IMAGE_SECTION_HEADER *resourceSection;
 
     // print section data
-    for (int i = 0; i < imageHeaders.FileHeader.NumberOfSections; i++)
+    for (uint8_t i = 0; i < imageHeaders.FileHeader.NumberOfSections; i++)
     {
         IMAGE_SECTION_HEADER *sectionHeader = &(imageSectionHeaders[i]);
-        printf("\t%s\n", sectionHeader->Name);
-        printf("\t\t0x%x\t\tVirtual Size\n", sectionHeader->Misc.VirtualSize);
-        printf("\t\t0x%x\t\tVirtual Address\n", sectionHeader->VirtualAddress);
-        printf("\t\t0x%x\t\tSize Of Raw Data\n", sectionHeader->SizeOfRawData);
-        printf("\t\t0x%x\t\tPointer To Raw Data\n", sectionHeader->PointerToRawData);
-        printf("\t\t0x%x\t\tPointer To Relocations\n", sectionHeader->PointerToRelocations);
-        printf("\t\t0x%x\t\tPointer To Line Numbers\n", sectionHeader->PointerToLinenumbers);
-        printf("\t\t0x%x\t\tNumber Of Relocations\n", sectionHeader->NumberOfRelocations);
-        printf("\t\t0x%x\t\tNumber Of Line Numbers\n", sectionHeader->NumberOfLinenumbers);
-        printf("\t\t0x%x\tCharacteristics\n", sectionHeader->Characteristics);
+        //printf("%s\n", sectionHeader->Name);
+        //printf("  0x%x\t\tVirtual Size\n", sectionHeader->Misc.VirtualSize);
+        //printf("  0x%x\t\tVirtual Address\n", sectionHeader->VirtualAddress);
+        //printf("  0x%x\t\tSize Of Raw Data\n", sectionHeader->SizeOfRawData);
+        //printf("  0x%x\t\tPointer To Raw Data\n", sectionHeader->PointerToRawData);
+        //printf("  0x%x\t\tPointer To Relocations\n", sectionHeader->PointerToRelocations);
+        //printf("  0x%x\t\tPointer To Line Numbers\n", sectionHeader->PointerToLinenumbers);
+        //printf("  0x%x\t\tNumber Of Relocations\n", sectionHeader->NumberOfRelocations);
+        //printf("  0x%x\t\tNumber Of Line Numbers\n", sectionHeader->NumberOfLinenumbers);
+        //printf("  0x%x\tCharacteristics\n\n", sectionHeader->Characteristics);
 
         // save section that contains import directory table
         if (importDirectoryRVA >= sectionHeader->VirtualAddress && importDirectoryRVA < (sectionHeader->VirtualAddress + sectionHeader->Misc.VirtualSize))
@@ -693,35 +1109,40 @@ int main(int argc, char **argv)
             //break;
         }
 
-        if (resourceRVA >= sectionHeader->VirtualAddress && resourceRVA < (sectionHeader->VirtualAddress + sectionHeader->Misc.VirtualSize))
+        if (resourceDirectoryRVA >= sectionHeader->VirtualAddress && resourceDirectoryRVA < (sectionHeader->VirtualAddress + sectionHeader->Misc.VirtualSize))
         {
             resourceSection = sectionHeader;
             //break;
         }
     }
 
-    //puts("Import Directory");
-    //printf(" RVA: 0x%08X\n", importDir.VirtualAddress);
-    //printf(" RVAtoFileOffset: 0x%08X\n", RVAtoFileOffset(&imageHeaders, importDir.VirtualAddress));
-    //printf("Size: %d\n\n", importDir.Size);
+    // Resources
 
-    if (!importDir.VirtualAddress || !importDir.Size)
-    {
-        fprintf(stderr, "No import directory\n.");
-        exit(EXIT_FAILURE);
-    }
+    size_t resourceSectionRawOffset = resourceSection->PointerToRawData;
+    size_t resourceSectionStartAddress = (resourceSectionRawOffset + (resourceDirectoryRVA - resourceSection->VirtualAddress));
 
-    size_t rawResourceOffset = resourceSection->PointerToRawData;
-    size_t resourceStartAddress = (rawResourceOffset + (resourceRVA - resourceSection->VirtualAddress));
+    //print32BitValue("Resource section offset", 0, resourceSectionStartAddress, 1);
+    //print32BitValue("Resource section size", 0, resourceSection->SizeOfRawData, 1);
+    //print32BitValue("Resource section start address", 0, resourceSectionStartAddress, 1);
 
-    print32BitValue("Resource offset", 0, resourceStartAddress, 1);
-    print32BitValue("Resource size", 0, resourceSection->SizeOfRawData, 1);
+    PE_RESOURCE_DIRECTORY_TABLE resourceDirectoryTable;
 
-    size_t rawOffset = importSection->PointerToRawData;
+    fseek(fp, resourceSectionStartAddress, SEEK_SET);
+
+    fread(&resourceDirectoryTable, sizeof(PE_RESOURCE_DIRECTORY_TABLE), 1, fp);
+
+    parseResourceDirectoryTable(&resourceDirectoryTable, resourceSectionStartAddress, fp, 0);
+    //print32BitValue("NumberOfIdEntries", 0, resourceDirectoryTable.NumberOfIdEntries, 0);
+    //print32BitValue("NumberOfNameEntries", 0, resourceDirectoryTable.NumberOfNameEntries, 0);
+    //print32BitValue("MajorVersion", 0, resourceDirectoryTable.MajorVersion, 0);
+    //print32BitValue("MinorVersion", 0, resourceDirectoryTable.MinorVersion, 0);
+    //print32BitValue("TimeStamp", 0, resourceDirectoryTable.TimeStamp, 0);
+
+    size_t importSectionRawOffset = importSection->PointerToRawData;
     // get pointer to import descriptor's file offset. Note that the formula for calculating file offset is: imageBaseAddress + pointerToRawDataOfTheSectionContainingRVAofInterest + (RVAofInterest - SectionContainingRVAofInterest.VirtualAddress)
-    size_t importDescriptorsStartAddress = (importSection->PointerToRawData + (imageHeaders.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress - importSection->VirtualAddress));
+    size_t importDescriptorsStartAddress = (importSectionRawOffset + (imageHeaders.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress - importSection->VirtualAddress));
 
-    uint16_t numImportDescriptors = importDir.Size / sizeof(IMAGE_IMPORT_DESCRIPTOR);
+    uint16_t numImportDescriptors = imageHeaders.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size / sizeof(IMAGE_IMPORT_DESCRIPTOR);
 
     fseek(fp, importDescriptorsStartAddress, SEEK_SET);
 
@@ -739,7 +1160,7 @@ int main(int argc, char **argv)
         IMAGE_IMPORT_DESCRIPTOR *importDescriptor = &(importDescriptors[i]);
         // imported dll modules
 
-        size_t stringAddress = (rawOffset + (importDescriptor->Name - importSection->VirtualAddress));
+        size_t stringAddress = (importSectionRawOffset + (importDescriptor->Name - importSection->VirtualAddress));
         char ch;
         fseek(fp, stringAddress, SEEK_SET);
         readNullTerminatedString(dllNameBuffer, 64, fp);
@@ -750,7 +1171,7 @@ int main(int argc, char **argv)
 
         IMAGE_THUNK_DATA thunkData;
         size_t thunk = importDescriptor->OriginalFirstThunk == 0 ? importDescriptor->FirstThunk : importDescriptor->OriginalFirstThunk;
-        size_t thunkAddress = (rawOffset + (thunk - importSection->VirtualAddress));
+        size_t thunkAddress = (importSectionRawOffset + (thunk - importSection->VirtualAddress));
 
         //thunkData = (IMAGE_THUNK_DATA*)(rawOffset + (thunk - importSection->VirtualAddress));
 
@@ -767,10 +1188,11 @@ int main(int argc, char **argv)
             {
                 //show lower bits of the value to get the ordinal ¯\_(ツ)_/¯
                 //printf("Ordinal: %x\n", (uint16_t)thunkData.u1.AddressOfData);
+                print16BitValue(0, 0, (uint16_t)thunkData.u1.Ordinal, DEC);
             }
             else
             {
-                size_t stringAddress = rawOffset + (thunkData.u1.AddressOfData - importSection->VirtualAddress + 2);
+                size_t stringAddress = importSectionRawOffset + (thunkData.u1.AddressOfData - importSection->VirtualAddress + 2);
                 fseek(fp, stringAddress, SEEK_SET);
                 readNullTerminatedString(dllNameBuffer, 64, fp);
                 if (strlen(dllNameBuffer))
@@ -782,46 +1204,12 @@ int main(int argc, char **argv)
     }
 
     jsonEndArray();
-    /*
 
-    for (uint16_t i = 0; i < numImportDescriptors; i++)
-    {
-        printf("IMAGE_IMPORT_DESCRIPTOR %d\n", i);
-        printf("OriginalFirstThunk: %08X\n", importDescriptors[i].OriginalFirstThunk);
-        printf("     TimeDateStamp: %08X\n", importDescriptors[i].TimeDateStamp);
-        printStringValue("Date", 0, timestampToString(importDescriptors[i].TimeDateStamp));
-        printf("    ForwarderChain: %08X\n", importDescriptors[i].ForwarderChain);
-        //if  (!IsBadReadPtr((char *)fileMap + importDescriptor->Name, 0x1000))
-        //    printf("              Name: %08X \"%s\"\n", importDescriptor->Name, (char *)fileMap + importDescriptor->Name);
-        //else
-        //    printf("              Name: %08X INVALID\n", importDescriptor->Name);
-        printf("              Name: %08X\n", importDescriptors[i].Name);
+    jsonStartObject("versionInfo");
 
-        printf("              Name: ");
+    parseVersionInfoSection(fp, versionInfoSectionStart, versionInfoSize);
 
-        fseek(fp, importDescriptors[i].Name, SEEK_SET);
-
-        uint8_t ch = 'o';
-
-        //while ((ch = fgetc(fp)) != '\0' && ch != EOF)
-        for (; i < 10; i++)
-        {
-            if (feof(fp))
-            {
-                fprintf(stderr, "error: Image Descriptor name at %#010x is outside file bounds.\n", importDescriptors[i].Name);
-                exit(EXIT_FAILURE);
-            }
-            //str[n][i++] = ch;
-            ch = fgetc(fp);
-            putc(ch, stdout);
-        }
-        //str[n][i] = '\0';
-        puts("");
-
-        printf("        FirstThunk: %08X\n", importDescriptors[i].FirstThunk);
-        puts("");
-    }*/
-
+    jsonEndObject();
     //TODO get versioninfo
 
     jsonEndObject();
