@@ -11,7 +11,7 @@
 
 #define PROGRAM_NAME "wcepeinfo"
 
-#define PROGRAM_VERSION "0.1"
+#define PROGRAM_VERSION "0.2"
 
 #define indent(amount) printf("%*s", amount, "");
 

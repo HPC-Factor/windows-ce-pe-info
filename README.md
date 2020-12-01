@@ -32,4 +32,4 @@ Typescript types are provides in WinCEPEInfoType.ts.
 Since there is no way to find out, the tool can't tell whether a program was compiled for Handheld PCs or Pocket PCs/Palm-Size PCs.
 There is an option of looking at DLL imports, so if a program imports a PocketPC-only DLL, you could fairly certainly say that the program was compiled for PocketPC.
 
-Thanks to Atkelar, C:Amie and ntware for helping out
+Thanks to Atkelar and C:Amie for helping out
