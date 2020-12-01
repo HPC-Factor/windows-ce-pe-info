@@ -53,26 +53,26 @@ typedef struct _IMAGE_SECTION_HEADER
 
 typedef struct _IMAGE_FILE_HEADER
 {
-    // Offset 0, length 2
-    /** The number that identifies the type of target machine. For more information, see Machine Types. **/
+    /* Offset 0, length 2 */
+    /** The number that identifies the type of target machine. For more information, see Machine Types. */
     uint16_t Machine;
-    // Offset 2, length 2
-    /** The number of sections. This indicates the size of the section table, which immediately follows the headers. **/
+    /* Offset 2, length 2 */
+    /** The number of sections. This indicates the size of the section table, which immediately follows the headers. */
     uint16_t NumberOfSections;
-    // Offset 4, length 4
-    /** The low 32 bits of the number of seconds since 00:00 January 1, 1970 (a C run-time time_t value), which indicates when the file was created. **/
+    /* Offset 4, length 4 */
+    /** The low 32 bits of the number of seconds since 00:00 January 1, 1970 (a C run-time time_t value), which indicates when the file was created. */
     uint32_t TimeDateStamp;
-    // Offset 8, length 4
-    /** The file offset of the COFF symbol table, or zero if no COFF symbol table is present. This value should be zero for an image because COFF debugging information is deprecated. **/
+    /* Offset 8, length 4 */
+    /** The file offset of the COFF symbol table, or zero if no COFF symbol table is present. This value should be zero for an image because COFF debugging information is deprecated. */
     uint32_t PointerToSymbolTable;
-    // Offset 12, length 4
-    /** The number of entries in the symbol table. This data can be used to locate the string table, which immediately follows the symbol table. This value should be zero for an image because COFF debugging information is deprecated. **/
+    /* Offset 12, length 4 */
+    /** The number of entries in the symbol table. This data can be used to locate the string table, which immediately follows the symbol table. This value should be zero for an image because COFF debugging information is deprecated. */
     uint32_t NumberOfSymbols;
-    // Offset 16, length 2
-    /** The size of the optional header, which is required for executable files but not for object files. This value should be zero for an object file. For a description of the header format, see Optional Header (Image Only). **/
+    /* Offset 16, length 2 */
+    /** The size of the optional header, which is required for executable files but not for object files. This value should be zero for an object file. For a description of the header format, see Optional Header (Image Only). */
     uint16_t SizeOfOptionalHeader;
-    // Offset 18, length 2
-    /** The flags that indicate the attributes of the file. For specific flag values, see Characteristics.  **/
+    /* Offset 18, length 2 */
+    /** The flags that indicate the attributes of the file. For specific flag values, see Characteristics. */
     uint16_t Characteristics;
 } IMAGE_FILE_HEADER;
 
@@ -130,7 +130,7 @@ typedef struct _IMAGE_OPTIONAL_HEADER32
     /** The address that is relative to the image base of the beginning-of-code section when it is loaded into memory.  */
     uint32_t BaseOfData;
 
-    // NT additional fields
+    /* NT additional fields */
 
     /** The preferred address of the first byte of image when loaded into memory; must be a multiple of 64 K. The default for DLLs is 0x10000000. The default for Windows CE EXEs is 0x00010000. The default for Windows NT, Windows 2000, Windows XP, Windows 95, Windows 98, and Windows Me is 0x00400000.  */
     uint32_t ImageBase;
@@ -723,39 +723,49 @@ typedef struct _VS_VERSIONINFO
     /** The Unicode string L"VS_VERSION_INFO". */
     wchar_t szKey[16];
     /** Contains as many zero words as necessary to align the Value member on a 32-bit boundary. */
-    //uint16_t Padding1;
+    /* uint8_t Padding1[0-3]; */
     /** Arbitrary data associated with this VS_VERSIONINFO structure. The wValueLength member specifies the length of this member; if wValueLength is zero, this member does not exist. */
-    //VS_FIXEDFILEINFO Value;
+    /* VS_FIXEDFILEINFO Value; */
     /** As many zero words as necessary to align the Children member on a 32-bit boundary. These bytes are not included in wValueLength. This member is optional. */
-    //uint16_t Padding2;
-
-    //uint16_t Children;
+    /* uint8_t Padding2[0-3]; */
+    /** An array of zero or one StringFileInfo structures, and zero or one VarFileInfo structures that are children of the current VS_VERSIONINFO structure. */
+    /* VS_STRING_FILE_INFO or VS_VAR_FILE_INFO Children[]; */
 } VS_VERSIONINFO;
 
 #define SZ_KEY_STRING_FILE_INFO L"StringFileInfo"
 
 typedef struct
 {
+    /** The length, in bytes, of the entire StringFileInfo block, including all structures indicated by the Children member. */
     uint16_t wLength;
+    /** This member is always equal to zero. */
     uint16_t wValueLength;
+    /* The type of data in the version resource. This member is 1 if the version resource contains text data and 0 if the version resource contains binary data. */
     uint16_t wType;
     /** The Unicode string L"StringFileInfo". */
     wchar_t szKey[15];
-    // WORD        Padding;
-    // VS_STRING_TABLE Children;
+    /** Padding to align file pointer to 32 bit again */
+    /* uint8_t padding[0-3]; */
+    /** An array of one or more StringTable structures. Each StringTable structure's szKey member indicates the appropriate language and code page for displaying the text in that StringTable structure. */
+    /* VS_STRING_TABLE Children[]; */
 } VS_STRING_FILE_INFO_HEADER;
 
 #define SZ_KEY_VAR_FILE_INFO L"VarFileInfo"
 
 typedef struct
 {
+    /** The length, in bytes, of the entire VarFileInfo block, including all structures indicated by the Children member. */
     uint16_t wLength;
+    /** This member is always equal to zero. */
     uint16_t wValueLength;
+    /** The type of data in the version resource. This member is 1 if the version resource contains text data and 0 if the version resource contains binary data. */
     uint16_t wType;
     /** The Unicode string L"VarFileInfo". */
     wchar_t szKey[12];
-    //WORD  Padding;
-    //Var   Children;
+    /** Padding to align file pointer to 32 bit again */
+    /* uint8_t padding[0-3]; */
+    /** Typically contains a list of languages that the application or DLL supports. */
+    /* VS_VAR Children[]; */
 } VS_VAR_FILE_INFO_HEADER;
 
 typedef struct
@@ -769,8 +779,10 @@ typedef struct
      * The four least significant digits represent the code page for which the data is formatted.
      * Each Microsoft Standard Language identifier contains two parts: the low-order 10 bits specify the major language, and the high-order 6 bits specify the sublanguage. */
     wchar_t szKey[9];
-    //WORD   Padding;
-    //VS_STRING Children;
+    /** Padding to align file pointer to 32 bit again */
+    /* uint8_t padding[0-3]; */
+    /** An array of one or more String structures. */
+    /* VS_STRING Children[]; */
 } VS_STRING_TABLE_HEADER;
 
 /** Represents the organization of data in a file-version resource. 
@@ -783,10 +795,12 @@ typedef struct
     uint16_t wValueLength;
     /** The type of data in the version resource. This member is 1 if the version resource contains text data and 0 if the version resource contains binary data. */
     uint16_t wType;
-    /** An arbitrary Unicode string. The szKey member can be one or more of the following values. These values are guidelines only. */
-    //wchar_t szKey[1];
-    //WORD  Padding;
-    //WORD  Value;
+    /** An arbitrary Unicode string. */
+    /* wchar_t szKey[n]; */
+    /** Padding to align file pointer to 32 bit again */
+    /* uint8_t padding[0-3]; */
+    /** An arbitrary Unicode string. */
+    /* wchar_t szKey[n]; */
 } VS_STRING_HEADER;
 
 #define SZ_KEY_VAR L"Translation"
@@ -803,8 +817,10 @@ typedef struct
     uint16_t wType;
     /** The Unicode string L"Translation". */
     wchar_t szKey[12];
-    //WORD  Padding;
-    //DWORD Value;
+    /** Padding to align file pointer to 32 bit again */
+    /* uint8_t padding[0-3]; */
+    /** An array of one or more values that are language and code page identifier pairs. For additional information, see the following Remarks section. */
+    /* DWORD Value[n]; */
 } VS_VAR_HEADER;
 
 #endif
