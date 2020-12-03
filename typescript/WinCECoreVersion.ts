@@ -1,0 +1,2 @@
+export const WinCECoreVersions = ["1.0", "1.01", "2.0", "2.01", "2.10", "2.11", "2.12", "3.0", "4.0", "4.10", "4.20", "5.0", "6.0", "7.0", "8.0"] as const;
+export type WinCECoreVersion = typeof WinCECoreVersions[number];

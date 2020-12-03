@@ -5,6 +5,7 @@
 
 #include <wchar.h>
 #include <string.h>
+#include "WinCEArchitecture.h"
 
 #define COFF_OFFSET 0x3C
 
@@ -279,22 +280,22 @@ typedef struct _IMAGE_THUNK_DATA32
 /** Unknown */
 /** ARM little endian */
 #define CE_IMAGE_FILE_MACHINE_ARM 0x01c0
-#define CE_NAME_IMAGE_FILE_MACHINE_ARM "ARM"
+#define CE_NAME_IMAGE_FILE_MACHINE_ARM CE_ARCH_ARM
 /** Intel 386 or later processors and compatible processors */
 #define CE_IMAGE_FILE_MACHINE_I386 0x014c
-#define CE_NAME_IMAGE_FILE_MACHINE_I386 "X86"
+#define CE_NAME_IMAGE_FILE_MACHINE_I386 CE_ARCH_X86
 /** MIPS little endian */
 #define CE_IMAGE_FILE_MACHINE_R4000 0x0166
-#define CE_NAME_IMAGE_FILE_MACHINE_R4000 "MIPS"
+#define CE_NAME_IMAGE_FILE_MACHINE_R4000 CE_ARCH_MIPS
 /** Hitachi SH3 */
 #define CE_IMAGE_FILE_MACHINE_SH3 0x01a2
-#define CE_NAME_IMAGE_FILE_MACHINE_SH3 "SH3"
+#define CE_NAME_IMAGE_FILE_MACHINE_SH3 CE_ARCH_SH3
 /** Hitachi SH4 */
 #define CE_IMAGE_FILE_MACHINE_SH4 0x01a6
-#define CE_NAME_IMAGE_FILE_MACHINE_SH4 "SH4"
+#define CE_NAME_IMAGE_FILE_MACHINE_SH4 CE_ARCH_SH4
 /** Thumb */
 #define CE_IMAGE_FILE_MACHINE_THUMB 0x01c2
-#define CE_NAME_IMAGE_FILE_MACHINE_THUMB "ARM"
+#define CE_NAME_IMAGE_FILE_MACHINE_THUMB CE_ARCH_ARM
 
 /*
 02 00 00 = Windows CE 2.0
