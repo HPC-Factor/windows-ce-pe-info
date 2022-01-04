@@ -7,6 +7,6 @@
 #define CE_ARCH_ARM "ARM"
 #define CE_ARCH_X86 "X86"
 #define CE_ARCH_XSCALE "XSCALE"
-#define CE_ARCH_XSCALE "THUMB"
+#define CE_ARCH_THUMB "THUMB"
 
 #endif

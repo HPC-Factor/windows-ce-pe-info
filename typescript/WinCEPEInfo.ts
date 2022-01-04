@@ -1,3 +1,4 @@
+import { WinCEArchitecture } from "./WinCEArchitecture";
 import { WinCECoreVersion } from "./WinCECoreVersion";
 
 export const MachineNames = [
@@ -30,24 +31,11 @@ export const MachineNames = [
 
 export type MachineName = typeof MachineNames[number];
 
-export const CEMachineNames = [
-  "MIPS",
-  "SH3",
-  "SH4",
-  "ARM",
-  "X86",
-  "XSCALE",
-] as const;
-
-export type CEMachineName = typeof CEMachineNames[number];
-
-
-
 export type WinCEPEInfo = {
   /** True if subsystem is 9 (Windows CE GUI) */
   WCEApp: boolean,
   /** Windows CE arch */
-  WCEArch: CEMachineName | "UNKNOWN",
+  WCEArch: WinCEArchitecture | "UNKNOWN",
   /** Windows CE core version */
   WCEVersion: WinCECoreVersion,
   /** The number that identifies the type of target machine. For more information, see Machine Types */
