@@ -2,4 +2,4 @@ testdata/
 .vscode/
 pedata/
 dist/
-src/*.o
+src/**/*.o
