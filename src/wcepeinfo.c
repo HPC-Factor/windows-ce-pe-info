@@ -18,12 +18,12 @@
 #define DEC 0
 #define HEX 1
 
-uint8_t printJson = 0;
-uint8_t jsonIndent = 0;
-uint8_t objCount = 0;
-uint8_t objLevel = 0;
-uint8_t onlyBasicInfo = 0;
-uint8_t firstValue = 1;
+int printJson = 0;
+int jsonIndent = 0;
+int objCount = 0;
+int objLevel = 0;
+int onlyBasicInfo = 0;
+int firstValue = 1;
 char *filterField = 0;
 IMAGE_NT_HEADERS32 imageHeaders;
 IMAGE_SECTION_HEADER *imageSectionHeaders;

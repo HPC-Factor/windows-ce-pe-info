@@ -412,33 +412,6 @@ typedef struct _IMAGE_THUNK_DATA32
 /**	Terminal Server aware.  */
 #define IMAGE_DLLCHARACTERISTICS_TERMINAL_SERVER_AWARE 0x8000
 
-// Subsystem values and names
-
-/** Unknown subsystem. */
-#define IMAGE_SUBSYSTEM_UNKNOWN 0
-#define NAME_IMAGE_SUBSYSTEM_UNKNOWN "UNKNOWN"
-/** Image doesn't require a subsystem. */
-#define IMAGE_SUBSYSTEM_NATIVE 1
-#define NAME_IMAGE_SUBSYSTEM_NATIVE "NATIVE"
-/** Image runs in the Windows GUI subsystem. */
-#define IMAGE_SUBSYSTEM_WINDOWS_GUI 2
-#define NAME_IMAGE_SUBSYSTEM_WINDOWS_GUI "WINDOWS_GUI"
-/** Image runs in the Windows character subsystem. */
-#define IMAGE_SUBSYSTEM_WINDOWS_CUI 3
-#define NAME_IMAGE_SUBSYSTEM_WINDOWS_CUI "WINDOWS_CUI"
-/** Image runs in the OS/2 character subsystem. */
-#define IMAGE_SUBSYSTEM_OS2_CUI 5
-#define NAME_IMAGE_SUBSYSTEM_OS2_CUI "OS2_CUI"
-/** Image runs in the Posix character subsystem. */
-#define IMAGE_SUBSYSTEM_POSIX_CUI 7
-#define NAME_IMAGE_SUBSYSTEM_POSIX_CUI "POSIX_CUI"
-/** Image is a native Win9x driver. */
-#define IMAGE_SUBSYSTEM_NATIVE_WINDOWS 8
-#define NAME_IMAGE_SUBSYSTEM_NATIVE_WINDOWS "NATIVE_WINDOWS"
-/** Image runs in the Windows CE subsystem. */
-#define IMAGE_SUBSYSTEM_WINDOWS_CE_GUI 9
-#define NAME_IMAGE_SUBSYSTEM_WINDOWS_CE_GUI "WINDOWS_CE_GUI"
-
 // Directory Entries
 
 /* Export Directory */
