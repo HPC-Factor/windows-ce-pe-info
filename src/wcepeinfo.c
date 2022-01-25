@@ -268,7 +268,6 @@ const char *timestampToString(uint32_t timeStamp32)
     if (tmp == NULL)
     {
         return error;
-        perror("Bla");
     }
 
     if (strftime(buffer, 80, "%Y-%m-%d", tmp) == 0)
