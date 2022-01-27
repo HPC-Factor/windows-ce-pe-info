@@ -1,5 +1,5 @@
 CC=gcc
-CFLAGS=-I. -fshort-wchar
+CFLAGS=-I.
 DEPS=src/WinCePEHeader.h
 
 build: src/wcepeinfo.o

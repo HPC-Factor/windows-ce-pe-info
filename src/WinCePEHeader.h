@@ -7,6 +7,8 @@
 #include <string.h>
 #include "WinCEArchitecture.h"
 
+#define WCHAR uint16_t
+
 #define COFF_OFFSET 0x3C
 
 #define PE32_MAGIC 0x010b
@@ -695,7 +697,7 @@ typedef struct _VS_VERSIONINFO
     /** The type of data in the version resource. This member is 1 if the version resource contains text data and 0 if the version resource contains binary data. */
     uint16_t wType;
     /** The Unicode string L"VS_VERSION_INFO". */
-    wchar_t szKey[16];
+    WCHAR szKey[16];
     /** Contains as many zero words as necessary to align the Value member on a 32-bit boundary. */
     /* uint8_t Padding1[0-3]; */
     /** Arbitrary data associated with this VS_VERSIONINFO structure. The wValueLength member specifies the length of this member; if wValueLength is zero, this member does not exist. */
@@ -717,7 +719,7 @@ typedef struct
     /* The type of data in the version resource. This member is 1 if the version resource contains text data and 0 if the version resource contains binary data. */
     uint16_t wType;
     /** The Unicode string L"StringFileInfo". */
-    wchar_t szKey[15];
+    WCHAR szKey[15];
     /** Padding to align file pointer to 32 bit again */
     /* uint8_t padding[0-3]; */
     /** An array of one or more StringTable structures. Each StringTable structure's szKey member indicates the appropriate language and code page for displaying the text in that StringTable structure. */
@@ -735,7 +737,7 @@ typedef struct
     /** The type of data in the version resource. This member is 1 if the version resource contains text data and 0 if the version resource contains binary data. */
     uint16_t wType;
     /** The Unicode string L"VarFileInfo". */
-    wchar_t szKey[12];
+    WCHAR szKey[12];
     /** Padding to align file pointer to 32 bit again */
     /* uint8_t padding[0-3]; */
     /** Typically contains a list of languages that the application or DLL supports. */
@@ -752,7 +754,7 @@ typedef struct
     /** An 8-digit hexadecimal number stored as a Unicode string. The four most significant digits represent the language identifier.
      * The four least significant digits represent the code page for which the data is formatted.
      * Each Microsoft Standard Language identifier contains two parts: the low-order 10 bits specify the major language, and the high-order 6 bits specify the sublanguage. */
-    wchar_t szKey[9];
+    WCHAR szKey[9];
     /** Padding to align file pointer to 32 bit again */
     /* uint8_t padding[0-3]; */
     /** An array of one or more String structures. */
@@ -770,11 +772,11 @@ typedef struct
     /** The type of data in the version resource. This member is 1 if the version resource contains text data and 0 if the version resource contains binary data. */
     uint16_t wType;
     /** An arbitrary Unicode string. */
-    /* wchar_t szKey[n]; */
+    /* WCHAR szKey[n]; */
     /** Padding to align file pointer to 32 bit again */
     /* uint8_t padding[0-3]; */
     /** An arbitrary Unicode string. */
-    /* wchar_t szKey[n]; */
+    /* WCHAR szKey[n]; */
 } VS_STRING_HEADER;
 
 #define SZ_KEY_VAR L"Translation"
@@ -790,7 +792,7 @@ typedef struct
     /** The type of data in the version resource. This member is 1 if the version resource contains text data and 0 if the version resource contains binary data. */
     uint16_t wType;
     /** The Unicode string L"Translation". */
-    wchar_t szKey[12];
+    WCHAR szKey[12];
     /** Padding to align file pointer to 32 bit again */
     /* uint8_t padding[0-3]; */
     /** An array of one or more values that are language and code page identifier pairs. For additional information, see the following Remarks section. */
