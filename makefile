@@ -1,15 +1,22 @@
 CC=gcc
 CFLAGS=-I.
-DEPS=src/WinCePEHeader.h
+DEPS=src/WinCePEHeader.h src/WinCEArchitecture.h src/cjson/cJSON.h
+OUT_DIR=dist
 
-build: src/wcepeinfo.o
-	$(CC) -o dist/wcepeinfo src/wcepeinfo.o
+# PREFIX is environment variable, but if it is not set, then set default value
+ifeq ($(PREFIX),)
+    PREFIX := /usr/local
+endif
+
+wcecabinfo: src/wcepeinfo.o src/cjson/cJSON.o
+	$(shell mkdir -p $(OUT_DIR))
+	$(CC) -o $(OUT_DIR)/wcepeinfo src/wcepeinfo.o src/cjson/cJSON.o
 
 %.o: %.c $(DEPS)
 	$(CC) -c -o $@ $< $(CFLAGS)
 
-clean:
-	rm -f src/*.o dist/wcepeinfo
-
 install: clean build
 	install -m 655 dist/wcepeinfo $(DESTDIR)/bin/
+
+clean:
+	rm -f src/*.o src/cjson/*.o dist/wcepeinfo dist/wcepeinfo.exe

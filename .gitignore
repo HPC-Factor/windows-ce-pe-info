@@ -3,3 +3,4 @@ testdata/
 pedata/
 dist/
 src/**/*.o
+src/wincepeinfo

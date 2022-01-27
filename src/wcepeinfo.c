@@ -11,6 +11,7 @@
 #include <unistd.h>
 
 #include "WinCePEHeader.h"
+#include "cjson/cJSON.h"
 
 #define PROGRAM_NAME "wcepeinfo"
 
@@ -21,18 +22,23 @@
 #define DEC 0
 #define HEX 1
 
-int printJson = 0;
-int jsonIndent = 0;
-int objCount = 0;
-int objLevel = 0;
-int onlyBasicInfo = 0;
-int firstValue = 1;
-char *filterField = 0;
-IMAGE_NT_HEADERS32 imageHeaders;
-IMAGE_SECTION_HEADER *imageSectionHeaders;
+// Variables set by get_opts
+static int printJson = 0;
+static int onlyBasicInfo = 0;
+static char *infile;
+static bool verbose_enabled = false;
+static char *filterField = NULL;
 
-size_t versionInfoSectionStart = 0;
-size_t versionInfoSize;
+static int jsonIndent = 0;
+static int objCount = 0;
+static int objLevel = 0;
+static int firstValue = 1;
+static cJSON *peJson;
+static IMAGE_NT_HEADERS32 imageHeaders;
+static IMAGE_SECTION_HEADER *imageSectionHeaders;
+
+static size_t versionInfoSectionStart = 0;
+static size_t versionInfoSize;
 
 void usage(int status) {
     puts(
@@ -57,22 +63,97 @@ Examples:\n\
     exit(status);
 }
 
-void version() {
-    puts("Version " PROGRAM_VERSION);
-    exit(0);
-}
-
+/**
+ * @brief Exit with EXIT_FAILURE code and print perror
+ *
+ * @param message Additional message
+ */
 void exit_perror(const char *message) {
     perror(message);
     exit(EXIT_FAILURE);
 }
 
+/**
+ * @brief Exit with error and print message
+ *
+ * @param message Message to print
+ */
 void exit_error(const char *message) {
     fprintf(stderr, "Error: %s\n", message);
     exit(EXIT_FAILURE);
 }
 
-static bool verbose_enabled = true;
+/**
+ * @brief Print Version information and exit
+ */
+void version() {
+    puts("Version " PROGRAM_VERSION);
+    exit(0);
+}
+
+/**
+ * @brief Process command line options
+ *
+ * @param argc
+ * @param argv
+ */
+static void get_opts(int argc, char **argv) {
+    static struct option long_options[] =
+        {
+            {"json", no_argument, 0, 'j'},
+            {"help", no_argument, NULL, 'h'},
+            {"version", no_argument, NULL, 'v'},
+            {"verbose", no_argument, NULL, 'V'},
+            {"basic", no_argument, NULL, 'b'},
+            {"field", required_argument, NULL, 'f'},
+            {NULL, 0, NULL, 0}};
+    /* getopt_long stores the option index here. */
+    int option_index = 0;
+    char c;
+
+    while ((c = getopt_long(argc, argv, "jbhvVf:", long_options, &option_index)) != -1) {
+        switch (c) {
+            case 'j':
+                printJson = 1;
+                break;
+            case 'b':
+                onlyBasicInfo = 1;
+                break;
+            case 'h':
+                usage(0);
+                break;
+            case 'f':
+                filterField = optarg;
+                break;
+            case 'v':
+                version();
+                break;
+            case 'V':
+                verbose_enabled = true;
+                break;
+            default:
+                abort();
+        }
+    }
+
+    /* field option overrides json option */
+    if ((filterField || onlyBasicInfo) && printJson) {
+        exit_error("--json can not be set at the same time as --filter or --basic");
+    }
+
+    /* Ignore --basic if filter field is set */
+    if (filterField) {
+        onlyBasicInfo = 0;
+    }
+
+    infile = "-";
+
+    if (optind < argc) {
+        infile = argv[optind++];
+    } else {
+        usage(0);
+    }
+}
 
 /**
  * @brief Print verbose message
@@ -90,21 +171,6 @@ static int verbose(const char *restrict format, ...) {
     va_end(args);
 
     return ret;
-}
-
-void newline() {
-    if (!printJson && firstValue) {
-        firstValue = 0;
-        return;
-    }
-    if (objLevel)
-        putc('\n', stdout);
-}
-
-void comma() {
-    if (objCount && printJson)
-        putc(',', stdout);
-    objCount++;
 }
 
 const char *machineCodeToName(uint16_t machineCode) {
@@ -356,137 +422,106 @@ const char *resourceTableEntryIdToName(uint32_t id) {
     }
 }
 
-void printFieldName(const char *fieldName, const char *fieldNameJson) {
-    if (filterField)
+#define CJSON_STACK_SIZE 32
+cJSON *cjson_stack[CJSON_STACK_SIZE];
+int cjson_stack_idx = -1;
+
+cJSON *cjson_push(cJSON *item) {
+    cjson_stack[++cjson_stack_idx] = item;
+    if (cjson_stack_idx >= CJSON_STACK_SIZE) {
+        exit_error("cjson stack overflow");
+    }
+    return item;
+}
+
+cJSON *cjson_pop() {
+    if (cjson_stack_idx == -1) {
+        exit_error("cjson stack underflow");
+    }
+    return cjson_stack[cjson_stack_idx--];
+}
+
+cJSON *cjson_get_current() {
+    if (cjson_stack_idx == -1) {
+        exit_error("cjson stack underflow");
+    }
+    return cjson_stack[cjson_stack_idx];
+}
+
+void printFieldName(const char *fieldName) {
+    if (!filterField && fieldName) printf("%s: ", fieldName);
+}
+
+void printStringValue(const char *fieldName, const char *fieldNameJson, const char *value) {
+    if (filterField && strcmp(filterField, fieldName))
         return;
     if (printJson) {
-        /* If fieldNameJson is undefined, use fieldname */
-        indent(jsonIndent * 2);
-        if (!fieldName)
-            return;
-        const char *fName = fieldNameJson ? fieldNameJson : fieldName;
-        printf("\"%s\": ", fName);
+        const char *f = fieldNameJson ? fieldNameJson : fieldName;
+        cJSON_AddStringToObject(cjson_get_current(), f, value);
     } else {
-        if (!fieldName)
-            return;
-        printf("%s: ", fieldName);
+        printFieldName(fieldName);
+        printf("%s\n", value);
     }
 }
 
 void print16BitValue(const char *fieldName, const char *fieldNameJson, uint16_t value, char hex) {
     if (filterField && strcmp(filterField, fieldName))
         return;
-    comma();
-    newline();
-    printFieldName(fieldName, fieldNameJson);
-
+    char valbuf[64];
     if (hex) {
-        if (printJson)
-            printf("\"0x%04hX\"", value);
-        else
-            printf("0x%04hX", value);
+        sprintf(valbuf, "0x%04hX", value);
+        printStringValue(fieldName, fieldNameJson, valbuf);
     } else {
-        printf("%u", value);
+        if (printJson) {
+            const char *f = fieldNameJson ? fieldNameJson : fieldName;
+            cJSON_AddNumberToObject(cjson_get_current(), f, value);
+        } else {
+            printFieldName(fieldName);
+            printf("%u\n", value);
+        }
     }
 }
 
-void printBoolValue(const char *fieldName, const char *fieldNameJson, uint16_t value) {
+void printBoolValue(const char *fieldName, const char *fieldNameJson, bool value) {
     if (filterField && strcmp(filterField, fieldName))
         return;
-    comma();
-    newline();
 
-    printFieldName(fieldName, fieldNameJson);
-    if (printJson)
-        printf("%s", value ? "true" : "false");
-    else
-        printf("%d", value ? 1 : 0);
+    if (printJson) {
+        const char *f = fieldNameJson ? fieldNameJson : fieldName;
+        cJSON_AddBoolToObject(cjson_get_current(), f, value);
+    } else {
+        printStringValue(fieldName, fieldNameJson, value ? "true" : "false");
+    }
 }
 
 void print32BitValue(const char *fieldName, const char *fieldNameJson, uint32_t value, char hex) {
     if (filterField && strcmp(filterField, fieldName))
         return;
-    comma();
-    newline();
-    printFieldName(fieldName, fieldNameJson);
+    char valbuf[64];
     if (hex) {
-        if (printJson)
-            printf("\"0x%08X\"", value);
-        else
-            printf("0x%08X", value);
+        sprintf(valbuf, "0x%08hX", value);
+        printStringValue(fieldName, fieldNameJson, valbuf);
     } else {
-        printf("%u", value);
-    }
-}
-
-void printStringValue(const char *fieldName, const char *fieldNameJson, const char *value) {
-    if (filterField && strcmp(filterField, fieldName))
-        return;
-    comma();
-    newline();
-    printFieldName(fieldName, fieldNameJson);
-    if (printJson)
-        putc('\"', stdout);
-    printf("%s", value);
-    if (printJson) {
-        putc('\"', stdout);
-    }
-}
-
-void jsonStartObject(const char *objectName) {
-    if (printJson) {
-        comma();
-        newline();
-
-        objCount = 0;
-        if (objectName) {
-            printFieldName(objectName, 0);
+        if (printJson) {
+            const char *f = fieldNameJson ? fieldNameJson : fieldName;
+            cJSON_AddNumberToObject(cjson_get_current(), f, value);
         } else {
-            indent(jsonIndent * 2);
+            printFieldName(fieldName);
+            printf("%u\n", value);
         }
-        printf("{");
-        jsonIndent++;
-    }
-    objLevel++;
-}
-
-void jsonStartArray(const char *objectName) {
-    if (printJson) {
-        comma();
-        newline();
-
-        objCount = 0;
-        if (objectName) {
-            printFieldName(objectName, 0);
-        } else {
-            indent(jsonIndent * 2);
-        }
-        printf("[");
-        jsonIndent++;
-    }
-    objLevel++;
-}
-
-void jsonEndArray() {
-    objLevel--;
-
-    if (printJson) {
-        newline();
-        if (jsonIndent > 0)
-            jsonIndent--;
-        indent(jsonIndent * 2);
-        printf("]");
     }
 }
 
-void jsonEndObject() {
+cJSON *jsonStartObject() {
+    if (printJson) return cjson_push(cJSON_CreateObject());
+    return NULL;
+}
+
+cJSON *jsonEndObject(const char *objectName) {
     if (printJson) {
-        newline();
-        objLevel--;
-        if (jsonIndent > 0)
-            jsonIndent--;
-        indent(jsonIndent * 2);
-        printf("}");
+        cJSON *obj = cjson_pop();
+        cJSON *parent = cjson_get_current();
+        cJSON_AddItemToObject(parent, objectName, obj);
     }
 }
 
@@ -672,7 +707,8 @@ uint8_t parseVersionInfoSection(FILE *fp, size_t versionInfoSectionStart, size_t
     // printf("String1: %s", testd);
     // exit(0);
 
-    jsonStartObject("versionInfo");
+    // JSON versionInfo start
+    jsonStartObject();
     fseek(fp, versionInfoSectionStart, SEEK_SET);
 
     /* print32BitValue("versionInfoStart", 0, versionInfoSectionStart, HEX); */
@@ -680,7 +716,6 @@ uint8_t parseVersionInfoSection(FILE *fp, size_t versionInfoSectionStart, size_t
 
     VS_VERSIONINFO versionInfoHeader;
     fread(&versionInfoHeader, sizeof(VS_VERSIONINFO), 1, fp);
-
 
     const char VS_VERSION_INFO[] = "V\0S\0_\0V\0E\0R\0S\0I\0O\0N\0_\0I\0N\0F\0O\0\0";
 
@@ -706,7 +741,7 @@ uint8_t parseVersionInfoSection(FILE *fp, size_t versionInfoSectionStart, size_t
     if (versionInfoHeader.wValueLength) {
         fread(&fixedFileInfo, versionInfoHeader.wValueLength, 1, fp);
         if (versionInfoHeader.wValueLength != sizeof(VS_FIXEDFILEINFO)) {
-            puts("versionInfoHeader.wValueLength != sizeof(VS_FIXEDFILEINFO)");
+            exit_error("versionInfoHeader.wValueLength != sizeof(VS_FIXEDFILEINFO)");
         }
     }
 
@@ -825,7 +860,8 @@ uint8_t parseVersionInfoSection(FILE *fp, size_t versionInfoSectionStart, size_t
             exit(EXIT_FAILURE);
         }
     }
-    jsonEndObject();
+    // JSON versionInfo end
+    jsonEndObject("versionInfo");
     return 1;
 }
 
@@ -928,79 +964,30 @@ void parseResourceDirectoryTable(PE_RESOURCE_DIRECTORY_TABLE *resourceDirectoryT
     /* jsonEndArray(); */
 }
 
+uint16_t freaduint16le(FILE *fptr) {
+    uint8_t bytes[2];
+    if (fread(bytes, 2, 1, fptr) != -1) {
+        return ((bytes[0]) | (bytes[1] << 8));
+    }
+    exit_perror("Error while reading uint16le");
+}
+
 int main(int argc, char **argv) {
     opterr = 0;
-    char c;
 
-    static struct option long_options[] =
-        {
-            {"json", no_argument, 0,
-             'j'},
-            {"help", no_argument, NULL,
-             'h'},
-            {"version", no_argument, NULL,
-             'v'},
-            {"basic", no_argument, NULL,
-             'b'},
-            {"field", required_argument, NULL,
-             'f'},
-            {NULL, 0, NULL, 0}};
-    /* getopt_long stores the option index here. */
-    int option_index = 0;
-
-    while ((c = getopt_long(argc, argv, "jbhvf:", long_options, &option_index)) != -1) {
-        switch (c) {
-            case 'j':
-                printJson = 1;
-                break;
-            case 'b':
-                onlyBasicInfo = 1;
-                break;
-            case 'h':
-                usage(0);
-                break;
-            case 'f':
-                filterField = optarg;
-                break;
-            case 'v':
-                version();
-                break;
-            default:
-                abort();
-        }
-    }
-
-    /* field option overrides json option */
-    if (filterField || onlyBasicInfo)
-        printJson = 0;
-
-    if (filterField)
-        onlyBasicInfo = 0;
-
-    const char *infile = "-";
-
-    if (optind < argc) {
-        infile = argv[optind++];
-    } else {
-        usage(0);
-    }
+    // Get options
+    get_opts(argc, argv);
 
     /* If file name was provided, open, otherwise use stdin */
     /* FILE *fp = strcmp(infile, "-") == 0 ? stdin : fopen(infile, "rb"); */
     FILE *fp = fopen(infile, "rb");
-
-    if (!fp) {
-        fprintf(stderr, "error: file open failed '%s'.\n", infile);
-        exit(EXIT_FAILURE);
-    }
+    if (!fp) exit_perror("Failed to open file");
 
     /* Seek to 0x3C, where the location of the COFF header is stored */
     fseek(fp, COFF_OFFSET, SEEK_SET);
 
-    /* Get location of COFF header (read 16 bit since some weird PEs have a start address > 0xFF) */
-    /* uint32_t coff_start = fgetc(fp); */
-    uint16_t coff_start;
-    fread(&coff_start, sizeof(uint16_t), 1, fp);
+    /* Location of COFF header (16 bit since some weird PEs have a start address > 0xFF) */
+    uint16_t coff_start = freaduint16le(fp);
 
     /* Seek to start of COFF header */
     fseek(fp, coff_start, SEEK_SET);
@@ -1027,7 +1014,7 @@ int main(int argc, char **argv) {
     }
 
     /* Start JSON block */
-    jsonStartObject(0);
+    peJson = jsonStartObject();
 
     /* True if arch is one of the non-x86 WinCE architectures */
     uint8_t isWinCEArch = (imageHeaders.FileHeader.Machine == CE_IMAGE_FILE_MACHINE_ARM) ||
@@ -1041,6 +1028,7 @@ int main(int argc, char **argv) {
 
     /** True if subsystem is 9 (Windows CE GUI) or subsystem is 2 and arch is a non-x86 WinCE arch */
     printBoolValue("WCEApp", 0, isWinCEApp);
+
 
     char wceVersionString[16];
 
@@ -1081,8 +1069,7 @@ int main(int argc, char **argv) {
     /* print32BitValue("PointerToSymbolTable", 0, imageHeaders.FileHeader.PointerToSymbolTable, HEX); */
 
     /* Characteristics */
-    jsonStartObject("Characteristics");
-
+    jsonStartObject();
     printBoolValue("IMAGE_FILE_RELOCS_STRIPPED", 0, (imageHeaders.FileHeader.Characteristics & IMAGE_FILE_RELOCS_STRIPPED) ? 1 : 0);
     printBoolValue("IMAGE_FILE_EXECUTABLE_IMAGE", 0, (imageHeaders.FileHeader.Characteristics & IMAGE_FILE_EXECUTABLE_IMAGE) ? 1 : 0);
     printBoolValue("IMAGE_FILE_LINE_NUMS_STRIPPED", 0, (imageHeaders.FileHeader.Characteristics & IMAGE_FILE_LINE_NUMS_STRIPPED) ? 1 : 0);
@@ -1098,7 +1085,7 @@ int main(int argc, char **argv) {
     printBoolValue("IMAGE_FILE_DLL", 0, (imageHeaders.FileHeader.Characteristics & IMAGE_FILE_DLL) ? 1 : 0);
     printBoolValue("IMAGE_FILE_UP_SYSTEM_ONLY", 0, (imageHeaders.FileHeader.Characteristics & IMAGE_FILE_UP_SYSTEM_ONLY) ? 1 : 0);
     printBoolValue("IMAGE_FILE_BYTES_REVERSED_HI", 0, (imageHeaders.FileHeader.Characteristics & IMAGE_FILE_BYTES_REVERSED_HI) ? 1 : 0);
-    jsonEndObject();
+    jsonEndObject("Characteristics");
 
     /* Optional Header */
     print16BitValue("Magic", 0, imageHeaders.OptionalHeader.Magic, HEX);
@@ -1288,7 +1275,8 @@ int main(int argc, char **argv) {
 
         char dllNameBuffer[64];
 
-        jsonStartArray("DLLImports");
+        // jsonStartArray("DLLImports");
+        cJSON *dllImportArray = cJSON_CreateArray();
 
         /* TODO check what's up with numInputDescriptors */
         for (uint16_t i = 0; i < (numImportDescriptors - 1); i++) {
@@ -1300,8 +1288,9 @@ int main(int argc, char **argv) {
             fseek(fp, stringAddress, SEEK_SET);
             readNullTerminatedString(dllNameBuffer, 64, fp);
 
-            jsonStartObject(0);
-            printStringValue("dllName", 0, dllNameBuffer);
+            // jsonStartObject(0);
+            cJSON *dllImportObject = cJSON_CreateObject();
+            cJSON_AddStringToObject(dllImportObject, "dllName", dllNameBuffer);
             /* printf("strlen %d\n", strlen(dllNameBuffer)); */
 
             IMAGE_THUNK_DATA thunkData;
@@ -1310,7 +1299,8 @@ int main(int argc, char **argv) {
 
             /* thunkData = (IMAGE_THUNK_DATA*)(rawOffset + (thunk - importSection->VirtualAddress)); */
 
-            jsonStartArray("functions");
+            cJSON *dllImportFunctionsArray = cJSON_CreateArray();
+
             do {
                 /* Read thunk data block */
                 fseek(fp, thunkAddress, SEEK_SET);
@@ -1321,27 +1311,31 @@ int main(int argc, char **argv) {
                 if (thunkData.u1.AddressOfData > 0x80000000) {
                     /* show lower bits of the value to get the ordinal ¯\_(ツ)_/¯ */
                     /* printf("Ordinal: %x\n", (uint16_t)thunkData.u1.AddressOfData); */
-                    print16BitValue(0, 0, (uint16_t)thunkData.u1.Ordinal, DEC);
+                    cJSON_AddItemToArray(dllImportFunctionsArray, cJSON_CreateNumber((uint16_t)thunkData.u1.Ordinal));
                 } else {
                     size_t stringAddress = importSectionRawOffset + (thunkData.u1.AddressOfData - importSection->VirtualAddress + 2);
                     fseek(fp, stringAddress, SEEK_SET);
                     readNullTerminatedString(dllNameBuffer, 64, fp);
                     if (strlen(dllNameBuffer))
-                        printStringValue(0, 0, dllNameBuffer);
+                        cJSON_AddItemToArray(dllImportFunctionsArray, cJSON_CreateString(dllNameBuffer));
                 }
             } while (thunkAddress += sizeof(IMAGE_THUNK_DATA));
-            jsonEndArray();
-            jsonEndObject();
+            cJSON_AddItemToObject(dllImportObject, "functions", dllImportFunctionsArray);
+            cJSON_AddItemToArray(dllImportArray, dllImportObject);
         }
 
-        jsonEndArray();
+        cJSON_AddItemToObject(cjson_get_current(), "DLLImports", dllImportArray);
     }
 
     parseVersionInfoSection(fp, versionInfoSectionStart, versionInfoSize);
 
-    jsonEndObject();
-
-    putc('\n', stdout);
+    /** Stringified JSON Object */
+    if (printJson) {
+        const char *stringJson = cJSON_Print(peJson);
+        if (stringJson == NULL) exit_error("Failed to print json.");
+        // Print JSON
+        puts(stringJson);
+    }
 
     if (ferror(fp))
         fprintf(stderr, "I/O error when reading");
