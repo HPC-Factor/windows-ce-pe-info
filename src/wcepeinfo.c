@@ -1,6 +1,5 @@
 #include <assert.h>
 #include <getopt.h>
-#include <iconv.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -12,10 +11,18 @@
 
 #include "WinCePEHeader.h"
 #include "cjson/cJSON.h"
+// Define USE_ICONV unless the program is compiles for Windows CE
+#if !defined USE_ICONV && !defined UNDER_CE
+#define USE_ICONV
+#endif
+
+#ifdef USE_ICONV
+#include <iconv.h>
+#endif
 
 #define PROGRAM_NAME "wcepeinfo"
 
-#define PROGRAM_VERSION "0.3"
+#define PROGRAM_VERSION "0.4"
 
 #define indent(amount) printf("%*s", amount, "");
 
@@ -69,7 +76,12 @@ Examples:\n\
  * @param message Additional message
  */
 void exit_perror(const char *message) {
+#ifdef UNDER_CE
+    // mingw32ce does not support perror
+    fputs(message, stdout);
+#else
     perror(message);
+#endif
     exit(EXIT_FAILURE);
 }
 
@@ -623,12 +635,26 @@ size_t strlenutf16(uint8_t *utf16str) {
 size_t utf16toutf8(char *out, char *str, size_t out_len) {
     size_t src_len = strlenutf16(str) + 2;
     size_t dst_len = out_len;
+    int status = 0;
+#ifdef USE_ICONV
     iconv_t icv = iconv_open("utf-8", "utf-16le");
     if (icv == (void *)-1) exit_perror("Could not open iconv");
 
-    int status = iconv(icv, &str, &src_len, &out, &dst_len);
+    status = iconv(icv, &str, &src_len, &out, &dst_len);
     // printf("len: %d", len);
     iconv_close(icv);
+#else
+    for (int i = 0; i < src_len; i++) {
+        uint8_t lower = str[i * 2];
+        uint8_t upper = str[i * 2 + 1];
+        if (upper) {
+            out[i] = '?';
+        } else {
+            out[i] = str[i * 2];
+        }
+    }
+#endif
+
     return status;
 }
 
@@ -638,7 +664,7 @@ void printutf16(const char *prefix, const uint8_t *str) {
         printf("%02X_", *ptr);
         printf("%02X ", *(ptr + 1));
     }
-    putc('\n', stdout);
+    fputc('\n', stdout);
 }
 
 #define MAX_UNSPECIFIED_UTF16_LENGTH_BYTES 256
@@ -692,27 +718,17 @@ uint8_t readutf16string(FILE *fp, char *out, int len) {
 }
 
 uint8_t parseVersionInfoSection(FILE *fp, size_t versionInfoSectionStart, size_t size) {
-    if (!versionInfoSectionStart || !size)
+    verbose("=== VERSION INFO ===\n");
+    if (!versionInfoSectionStart || !size) {
+        verbose("No version info section\n");
         return 0;
-
-    // const uint8_t testc[] = {0xC7, 0x30, 0xB9, 0x30, 0xAF, 0x30, 0xC8, 0x30, 0xC3, 0x30, 0xD7, 0x30, 0xDE, 0x30, 0xCD, 0x30, 0xFC, 0x30, 0xB8, 0x30, 0xE3, 0x30, 0xFC, 0x30, 0x20, 0x00, 0x62, 0x00, 0x79, 0x00, 0x20, 0x00, 0x7F, 0x30, 0x5A, 0x30, 0x4D, 0x30, 0xE5, 0x5D, 0x3F, 0x62, 0x00, 0x00};
-    // const size_t out_size = (strlenutf16(testc) + 2) * 2;
-    //
-    // char *testd = calloc(out_size, sizeof(char));
-    //
-    // printutf16("String1", testc);
-    // printf("String1 len: %ld\n", strlenutf16(testc));
-    //
-    // utf16toutf8(testd, testc, out_size);
-    // printf("String1: %s", testd);
-    // exit(0);
+    }
+    verbose("  versionInfoStart 0x%x\n", versionInfoSectionStart);
+    verbose("  versionInfoSize  %lu\n", size);
 
     // JSON versionInfo start
     jsonStartObject();
     fseek(fp, versionInfoSectionStart, SEEK_SET);
-
-    /* print32BitValue("versionInfoStart", 0, versionInfoSectionStart, HEX); */
-    /* print32BitValue("versionInfoSize", 0, size, HEX); */
 
     VS_VERSIONINFO versionInfoHeader;
     fread(&versionInfoHeader, sizeof(VS_VERSIONINFO), 1, fp);
@@ -1029,7 +1045,6 @@ int main(int argc, char **argv) {
     /** True if subsystem is 9 (Windows CE GUI) or subsystem is 2 and arch is a non-x86 WinCE arch */
     printBoolValue("WCEApp", 0, isWinCEApp);
 
-
     char wceVersionString[16];
 
     /* The windows CE version is encoded in subsystem version, except for CE1.0 software, which often has subsystem version 4.0
@@ -1052,7 +1067,7 @@ int main(int argc, char **argv) {
     printStringValue("WCEArch", 0, machineCodeToWindowsCEArch(imageHeaders.FileHeader.Machine));
 
     if (onlyBasicInfo) {
-        putc('\n', stdout);
+        fputc('\n', stdout);
         exit(EXIT_SUCCESS);
     }
 
@@ -1150,86 +1165,91 @@ int main(int argc, char **argv) {
     size_t sectionLocation = (size_t)(&imageHeaders) + sizeof(uint32_t) + (size_t)(sizeof(IMAGE_FILE_HEADER)) + (size_t)imageHeaders.FileHeader.SizeOfOptionalHeader;
     size_t sectionSize = sizeof(IMAGE_SECTION_HEADER);
 
-    /*for (int i = 1; i < IMAGE_NUMBEROF_DIRECTORY_ENTRIES; i++)
-    {
-        char *name;
-        switch (i)
-        {
-        case IMAGE_DIRECTORY_ENTRY_EXPORT:
-            name = "Export Directory";
-            break;
-        case IMAGE_DIRECTORY_ENTRY_IMPORT:
-            name = "Import Directory";
-            break;
-        case IMAGE_DIRECTORY_ENTRY_RESOURCE:
-            name = "Resource Directory";
-            break;
-        case IMAGE_DIRECTORY_ENTRY_EXCEPTION:
-            name = "Exception Directory";
-            break;
-        case IMAGE_DIRECTORY_ENTRY_SECURITY:
-            name = "Security Directory";
-            break;
-        case IMAGE_DIRECTORY_ENTRY_BASERELOC:
-            name = "Base Relocation Table";
-            break;
-        case IMAGE_DIRECTORY_ENTRY_DEBUG:
-            name = "Debug Directory";
-            break;
-        case IMAGE_DIRECTORY_ENTRY_ARCHITECTURE:
-            name = "Architecture Specific Data";
-            break;
-        case IMAGE_DIRECTORY_ENTRY_GLOBALPTR:
-            name = "RVA of GP";
-            break;
-        case IMAGE_DIRECTORY_ENTRY_TLS:
-            name = "TLS Directory";
-            break;
-        case IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG:
-            name = "Load Configuration Directory";
-            break;
-        case IMAGE_DIRECTORY_ENTRY_BOUND_IMPORT:
-            name = "Bound Import Directory in headers";
-            break;
-        case IMAGE_DIRECTORY_ENTRY_IAT:
-            name = "Import Address Table";
-            break;
-        case IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT:
-            name = "Delay Load Import Descriptors";
-            break;
-        case IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR:
-            name = "COM Runtime descriptor";
-            break;
+    if (verbose_enabled) {
+        verbose("\n=== DIRECTORY ENTRIES ===\n");
+        for (int i = 1; i < IMAGE_NUMBEROF_DIRECTORY_ENTRIES; i++) {
+            char *name;
+            switch (i) {
+                case IMAGE_DIRECTORY_ENTRY_EXPORT:
+                    name = "Export Directory";
+                    break;
+                case IMAGE_DIRECTORY_ENTRY_IMPORT:
+                    name = "Import Directory";
+                    break;
+                case IMAGE_DIRECTORY_ENTRY_RESOURCE:
+                    name = "Resource Directory";
+                    break;
+                case IMAGE_DIRECTORY_ENTRY_EXCEPTION:
+                    name = "Exception Directory";
+                    break;
+                case IMAGE_DIRECTORY_ENTRY_SECURITY:
+                    name = "Security Directory";
+                    break;
+                case IMAGE_DIRECTORY_ENTRY_BASERELOC:
+                    name = "Base Relocation Table";
+                    break;
+                case IMAGE_DIRECTORY_ENTRY_DEBUG:
+                    name = "Debug Directory";
+                    break;
+                case IMAGE_DIRECTORY_ENTRY_ARCHITECTURE:
+                    name = "Architecture Specific Data";
+                    break;
+                case IMAGE_DIRECTORY_ENTRY_GLOBALPTR:
+                    name = "RVA of GP";
+                    break;
+                case IMAGE_DIRECTORY_ENTRY_TLS:
+                    name = "TLS Directory";
+                    break;
+                case IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG:
+                    name = "Load Configuration Directory";
+                    break;
+                case IMAGE_DIRECTORY_ENTRY_BOUND_IMPORT:
+                    name = "Bound Import Directory in headers";
+                    break;
+                case IMAGE_DIRECTORY_ENTRY_IAT:
+                    name = "Import Address Table";
+                    break;
+                case IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT:
+                    name = "Delay Load Import Descriptors";
+                    break;
+                case IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR:
+                    name = "COM Runtime descriptor";
+                    break;
+            }
+            verbose("Directory Entry: %s\n", name);
+            if (imageHeaders.OptionalHeader.DataDirectory[i].VirtualAddress) {
+                verbose("  VirtualAddress 0x%x\n", imageHeaders.OptionalHeader.DataDirectory[i].VirtualAddress);
+                verbose("  Size           0x%x\n", imageHeaders.OptionalHeader.DataDirectory[i].Size);
+            } else {
+                verbose("  <no data>\n");
+            }
         }
-        if (imageHeaders.OptionalHeader.DataDirectory[i].VirtualAddress)
-        {
-            jsonStartObject(name);
-            print16BitValue("VirtualAddress", 0, imageHeaders.OptionalHeader.DataDirectory[i].VirtualAddress, HEX);
-            print16BitValue("Size", 0, imageHeaders.OptionalHeader.DataDirectory[i].Size, HEX);
-            jsonEndObject();
-        }
-    }*/
+        verbose("\n");
+    }
 
     /* get offset to the import directory RVA */
     size_t importDirectoryRVA = imageHeaders.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
     size_t resourceDirectoryRVA = imageHeaders.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_RESOURCE].VirtualAddress;
 
-    IMAGE_SECTION_HEADER *importSection;
-    IMAGE_SECTION_HEADER *resourceSection;
+    IMAGE_SECTION_HEADER *importSection = NULL;
+    IMAGE_SECTION_HEADER *resourceSection = NULL;
 
+    verbose("\n=== SECTION HEADERS ===\n");
     /* Find sections */
     for (uint8_t i = 0; i < imageHeaders.FileHeader.NumberOfSections; i++) {
         IMAGE_SECTION_HEADER *sectionHeader = &(imageSectionHeaders[i]);
-        /* printf("%s\n", sectionHeader->Name); */
-        /* printf("  0x%x\t\tVirtual Size\n", sectionHeader->Misc.VirtualSize); */
-        /* printf("  0x%x\t\tVirtual Address\n", sectionHeader->VirtualAddress); */
-        /* printf("  0x%x\t\tSize Of Raw Data\n", sectionHeader->SizeOfRawData); */
-        /* printf("  0x%x\t\tPointer To Raw Data\n", sectionHeader->PointerToRawData); */
-        /* printf("  0x%x\t\tPointer To Relocations\n", sectionHeader->PointerToRelocations); */
-        /* printf("  0x%x\t\tPointer To Line Numbers\n", sectionHeader->PointerToLinenumbers); */
-        /* printf("  0x%x\t\tNumber Of Relocations\n", sectionHeader->NumberOfRelocations); */
-        /* printf("  0x%x\t\tNumber Of Line Numbers\n", sectionHeader->NumberOfLinenumbers); */
-        /* printf("  0x%x\tCharacteristics\n\n", sectionHeader->Characteristics); */
+        if (verbose_enabled) {
+            verbose("Section Header: %s\n", sectionHeader->Name);
+            verbose("  Virtual Size             0x%x\n", sectionHeader->Misc.VirtualSize);
+            verbose("  Virtual Address          0x%x\n", sectionHeader->VirtualAddress);
+            verbose("  Size Of Raw Data         0x%x\n", sectionHeader->SizeOfRawData);
+            verbose("  Pointer To Raw Data      0x%x\n", sectionHeader->PointerToRawData);
+            verbose("  Pointer To Relocations   0x%x\n", sectionHeader->PointerToRelocations);
+            verbose("  Pointer To Line Numbers  0x%x\n", sectionHeader->PointerToLinenumbers);
+            verbose("  Number Of Relocations    0x%x\n", sectionHeader->NumberOfRelocations);
+            verbose("  Number Of Line Numbers   0x%x\n", sectionHeader->NumberOfLinenumbers);
+            verbose("  Caracteristics           0x%x\n\n", sectionHeader->Characteristics);
+        }
 
         /* save section that contains import directory table */
         if (importDirectoryRVA >= sectionHeader->VirtualAddress && importDirectoryRVA < (sectionHeader->VirtualAddress + sectionHeader->Misc.VirtualSize)) {
@@ -1245,53 +1265,61 @@ int main(int argc, char **argv) {
 
     /* Resources */
 
-    size_t resourceSectionRawOffset = resourceSection->PointerToRawData;
-    size_t resourceSectionStartAddress = (resourceSectionRawOffset + (resourceDirectoryRVA - resourceSection->VirtualAddress));
+    verbose("=== RESOURCE SECTION ===\n");
+    if (resourceSection) {
+        size_t resourceSectionRawOffset = resourceSection->PointerToRawData;
+        size_t resourceSectionStartAddress = (resourceSectionRawOffset + (resourceDirectoryRVA - resourceSection->VirtualAddress));
 
-    /* print32BitValue("Resource section offset", 0, resourceSectionStartAddress, 1); */
-    /* print32BitValue("Resource section size", 0, resourceSection->SizeOfRawData, 1); */
-    /* print32BitValue("Resource section start address", 0, resourceSectionStartAddress, 1); */
+        verbose("  Resource section offset        0x%x\n", resourceSectionStartAddress);
+        verbose("  Resource section size          0x%x\n", resourceSection->SizeOfRawData);
+        verbose("  Resource section start address 0x%x\n", resourceSectionStartAddress);
 
-    PE_RESOURCE_DIRECTORY_TABLE resourceDirectoryTable;
-    fseek(fp, resourceSectionStartAddress, SEEK_SET);
-    fread(&resourceDirectoryTable, sizeof(PE_RESOURCE_DIRECTORY_TABLE), 1, fp);
+        PE_RESOURCE_DIRECTORY_TABLE resourceDirectoryTable;
+        fseek(fp, resourceSectionStartAddress, SEEK_SET);
+        fread(&resourceDirectoryTable, sizeof(PE_RESOURCE_DIRECTORY_TABLE), 1, fp);
 
-    parseResourceDirectoryTable(&resourceDirectoryTable, resourceSectionStartAddress, fp, 0);
+        parseResourceDirectoryTable(&resourceDirectoryTable, resourceSectionStartAddress, fp, 0);
+    } else {
+        verbose("Warning: No Resource section found\n");
+    }
 
     /* DLL Imports */
 
     if (printJson) {
+        verbose("=== DLL IMPORTS ===\n");
         size_t importSectionRawOffset = importSection->PointerToRawData;
-        /* get pointer to import descriptor's file offset. Note that the formula for calculating file offset is: imageBaseAddress + pointerToRawDataOfTheSectionContainingRVAofInterest + (RVAofInterest - SectionContainingRVAofInterest.VirtualAddress) */
+        /* Pointer to import descriptor's file offset. Note that the formula for calculating file offset is: imageBaseAddress + pointerToRawDataOfTheSectionContainingRVAofInterest + (RVAofInterest - SectionContainingRVAofInterest.VirtualAddress) */
         size_t importDescriptorsStartAddress = (importSectionRawOffset + (imageHeaders.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress - importSection->VirtualAddress));
 
-        uint16_t numImportDescriptors = imageHeaders.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size / sizeof(IMAGE_IMPORT_DESCRIPTOR);
+        /** Theoretical upper limit of import descriptors based on the size of the data directory */
+        int maxImportDescriptors = imageHeaders.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size / sizeof(IMAGE_IMPORT_DESCRIPTOR);
+        // verbose("sizeImportDescriptors: %u\n", imageHeaders.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size);
 
         fseek(fp, importDescriptorsStartAddress, SEEK_SET);
 
-        IMAGE_IMPORT_DESCRIPTOR importDescriptors[numImportDescriptors];
+        IMAGE_IMPORT_DESCRIPTOR *importDescriptors = malloc(maxImportDescriptors * sizeof(IMAGE_IMPORT_DESCRIPTOR));
 
-        fread(importDescriptors, sizeof(IMAGE_IMPORT_DESCRIPTOR), numImportDescriptors, fp);
+        fread(importDescriptors, sizeof(IMAGE_IMPORT_DESCRIPTOR), maxImportDescriptors, fp);
 
-        char dllNameBuffer[64];
+        char dllNameBuffer[256];
 
-        // jsonStartArray("DLLImports");
         cJSON *dllImportArray = cJSON_CreateArray();
 
-        /* TODO check what's up with numInputDescriptors */
-        for (uint16_t i = 0; i < (numImportDescriptors - 1); i++) {
+        for (int i = 0; i < (maxImportDescriptors - 1); i++) {
             IMAGE_IMPORT_DESCRIPTOR *importDescriptor = &(importDescriptors[i]);
-            /* imported dll modules */
 
+            // If the first 4 bytes are zero, the inportdescriptors list is terminated
+            if (!importDescriptor->Characteristics) break;
+
+            /* imported dll modules */
             size_t stringAddress = (importSectionRawOffset + (importDescriptor->Name - importSection->VirtualAddress));
-            char ch;
             fseek(fp, stringAddress, SEEK_SET);
             readNullTerminatedString(dllNameBuffer, 64, fp);
 
             // jsonStartObject(0);
             cJSON *dllImportObject = cJSON_CreateObject();
             cJSON_AddStringToObject(dllImportObject, "dllName", dllNameBuffer);
-            /* printf("strlen %d\n", strlen(dllNameBuffer)); */
+            verbose("  DLL: %s\n", dllNameBuffer);
 
             IMAGE_THUNK_DATA thunkData;
             size_t thunk = importDescriptor->OriginalFirstThunk == 0 ? importDescriptor->FirstThunk : importDescriptor->OriginalFirstThunk;
@@ -1305,19 +1333,23 @@ int main(int argc, char **argv) {
                 /* Read thunk data block */
                 fseek(fp, thunkAddress, SEEK_SET);
                 fread(&thunkData, sizeof(IMAGE_THUNK_DATA), 1, fp);
-                if (!thunkData.u1.AddressOfData)
+
+                if (!thunkData.u1.AddressOfData) {
                     break;
+                }
                 /* a cheap and probably non-reliable way of checking if the function is imported via its ordinal number ¯\_(ツ)_/¯ */
                 if (thunkData.u1.AddressOfData > 0x80000000) {
                     /* show lower bits of the value to get the ordinal ¯\_(ツ)_/¯ */
-                    /* printf("Ordinal: %x\n", (uint16_t)thunkData.u1.AddressOfData); */
+                    verbose("    Ordinal:  %x\n", (uint16_t)thunkData.u1.Ordinal);
                     cJSON_AddItemToArray(dllImportFunctionsArray, cJSON_CreateNumber((uint16_t)thunkData.u1.Ordinal));
                 } else {
                     size_t stringAddress = importSectionRawOffset + (thunkData.u1.AddressOfData - importSection->VirtualAddress + 2);
                     fseek(fp, stringAddress, SEEK_SET);
                     readNullTerminatedString(dllNameBuffer, 64, fp);
-                    if (strlen(dllNameBuffer))
+                    verbose("    Function: %s\n", dllNameBuffer);
+                    if (strlen(dllNameBuffer)) {
                         cJSON_AddItemToArray(dllImportFunctionsArray, cJSON_CreateString(dllNameBuffer));
+                    }
                 }
             } while (thunkAddress += sizeof(IMAGE_THUNK_DATA));
             cJSON_AddItemToObject(dllImportObject, "functions", dllImportFunctionsArray);
@@ -1331,6 +1363,7 @@ int main(int argc, char **argv) {
 
     /** Stringified JSON Object */
     if (printJson) {
+        verbose("=== JSON OUTPUT ===");
         const char *stringJson = cJSON_Print(peJson);
         if (stringJson == NULL) exit_error("Failed to print json.");
         // Print JSON
