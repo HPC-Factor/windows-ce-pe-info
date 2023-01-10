@@ -1,5 +1,5 @@
-import { WinCEArchitecture } from "./WinCEArchitecture";
-import { WinCECoreVersion } from "./WinCECoreVersion";
+import { WinCEArchitecture } from "./WindowsCEArchitecture";
+import { WinCECoreVersion } from "./WindowsCECoreVersion";
 
 export type WinCECabInfo = {
     /** Target architecture for this cabinet: see Appendix A */
