@@ -843,8 +843,9 @@ uint8_t parseVersionInfoSection(FILE *fp, size_t versionInfoSectionStart, size_t
 
                     /* fseek(fp, stringHeaderEndPosition, SEEK_SET); */
 
-                    if (ftell(fp) > stringHeaderEndPosition)
-                        fprintf(stderr, "ftell(fp)> stringHeaderEndPosition");
+                    //if (ftell(fp) > stringHeaderEndPosition){
+                        //fprintf(stderr, "ftell(fp)> stringHeaderEndPosition");
+                    //}
 
                     /* Align to 32Bit after each string */
                     falign32bit(fp);

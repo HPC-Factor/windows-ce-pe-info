@@ -307,8 +307,8 @@ typedef struct _IMAGE_THUNK_DATA32
 02 00 0C = CE 2.12
 03 00 00 = CE 3.0
 04 00 00 = CE.net 4.0
-04 00 0A = CE.net 4.1
-04 00 14 = CE.net 4.2
+04 00 0A = CE.net 4.10
+04 00 14 = CE.net 4.20
 04 00 15 = CE.net 4.21 (Windows Mobile 2003 SE)
 */
 
